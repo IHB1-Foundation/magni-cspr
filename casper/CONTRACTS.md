@@ -55,3 +55,15 @@ Note: This run successfully deployed token contracts, but the Magni deployment f
 | Validator | `012b365e09c5d75187b4abc25c4aa28109133bab6a256ef4abe24348073e590d80` |
 
 ---
+
+## Deployment: 2026-01-10T22:54:10Z
+
+| Field | Value |
+|-------|-------|
+| Network | casper-test |
+| Node RPC | https://node.testnet.casper.network |
+| mCSPR | `Contract(ContractPackageHash(e8fa988e89d6c7d1abac54de32e61bca28ac9bedc689f556d8256bf6e14dfbd4))` |
+| Magni | `Contract(ContractPackageHash(7b56884aebc6e9cb3cc495f42cfc99a56be73b96c32fadf9931c0f205a29ef5f))` |
+| Validator | `012b365e09c5d75187b4abc25c4aa28109133bab6a256ef4abe24348073e590d80` |
+
+---
