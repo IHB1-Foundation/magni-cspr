@@ -93,6 +93,16 @@ interface TxState {
   error?: string
 }
 
+type ActivityStatus = 'pending' | 'success' | 'error' | 'unknown'
+
+interface ActivityItem {
+  label: string
+  hash: string
+  status: ActivityStatus
+  timestamp: number
+  error?: string
+}
+
 // Vault status enum (matches contract)
 type VaultStatusType = 0 | 1 | 2
 const VaultStatus = {
@@ -103,6 +113,8 @@ const VaultStatus = {
 
 // LocalStorage key for persisting vault state
 const VAULT_STATE_KEY = 'magni_vault_state'
+const ACTIVITY_STATE_KEY_PREFIX = 'magni_activity_v1'
+const ACTIVITY_MAX_ITEMS = 50
 
 interface PersistedVaultState {
   collateralMotes: string
@@ -201,6 +213,24 @@ interface DeployInfoResult {
   execution_results?: Array<{
     result: DeployExecutionResult
   }>
+}
+
+async function fetchDeployActivityStatus(deployHash: string): Promise<{ status: ActivityStatus; error?: string }> {
+  try {
+    const result = await jsonRpc<DeployInfoResult>('info_get_deploy', { deploy_hash: deployHash })
+
+    if (result.execution_results && result.execution_results.length > 0) {
+      const execResult = result.execution_results[0].result
+      if (execResult.Success !== undefined) return { status: 'success' }
+      if (execResult.Failure) {
+        return { status: 'error', error: execResult.Failure.error_message || 'Execution failed' }
+      }
+    }
+
+    return { status: 'pending' }
+  } catch (err) {
+    return { status: 'unknown', error: err instanceof Error ? err.message : 'Unknown error' }
+  }
 }
 
 // Wait for deploy confirmation using jsonRpc directly
@@ -362,6 +392,10 @@ function App() {
   const [withdrawTx, setWithdrawTx] = useState<TxState>({ status: 'idle' })
   const [finalizeTx, setFinalizeTx] = useState<TxState>({ status: 'idle' })
 
+  // Activity (persisted across sessions)
+  const [activityItems, setActivityItems] = useState<ActivityItem[]>([])
+  const [isRefreshingActivity, setIsRefreshingActivity] = useState(false)
+
   // Contract configured check
   const contractsConfigured = Boolean(mcsprPackageHashHex && magniPackageHashHex)
 
@@ -426,6 +460,108 @@ function App() {
       timestamp: Date.now(),
     })
   }, [activeKey, collateralMotes, debtWad, ltvBps, pendingWithdrawMotes, mCSPRBalance, vaultStatus])
+
+  const recordActivityPending = useCallback((label: string, hash: string) => {
+    setActivityItems(prev => {
+      const next: ActivityItem[] = [
+        { label, hash, status: 'pending', timestamp: Date.now() },
+        ...prev.filter(i => i.hash !== hash),
+      ]
+      next.sort((a, b) => b.timestamp - a.timestamp)
+      return next.slice(0, ACTIVITY_MAX_ITEMS)
+    })
+  }, [])
+
+  const recordActivityFinal = useCallback((hash: string, status: ActivityStatus, error?: string) => {
+    setActivityItems(prev => prev.map(i => i.hash === hash ? { ...i, status, error } : i))
+  }, [])
+
+  // Load activity from localStorage on wallet connect / key change
+  useEffect(() => {
+    if (!isConnected || !activeKey) {
+      setActivityItems([])
+      return
+    }
+
+    const storageKey = `${ACTIVITY_STATE_KEY_PREFIX}:${CHAIN_NAME}:${activeKey.toLowerCase()}`
+    try {
+      const raw = localStorage.getItem(storageKey)
+      const parsed = raw ? (JSON.parse(raw) as ActivityItem[]) : []
+      const normalized = Array.isArray(parsed)
+        ? parsed
+          .filter(i => i && typeof i.hash === 'string' && typeof i.label === 'string')
+          .map(i => ({
+            label: i.label,
+            hash: i.hash,
+            status: (i.status === 'pending' || i.status === 'success' || i.status === 'error' || i.status === 'unknown')
+              ? i.status
+              : 'unknown',
+            timestamp: typeof i.timestamp === 'number' ? i.timestamp : Date.now(),
+            error: typeof i.error === 'string' ? i.error : undefined,
+          }))
+          .sort((a, b) => b.timestamp - a.timestamp)
+          .slice(0, ACTIVITY_MAX_ITEMS)
+        : []
+
+      setActivityItems(normalized)
+
+      const pending = normalized.filter(i => i.status === 'pending').slice(0, 10)
+      if (pending.length > 0) {
+        let cancelled = false
+        ;(async () => {
+          setIsRefreshingActivity(true)
+          try {
+            await Promise.all(
+              pending.map(async (item) => {
+                const refreshed = await fetchDeployActivityStatus(item.hash)
+                if (cancelled) return
+                if (refreshed.status !== 'pending') {
+                  recordActivityFinal(item.hash, refreshed.status, refreshed.error)
+                }
+              })
+            )
+          } finally {
+            if (!cancelled) setIsRefreshingActivity(false)
+          }
+        })()
+        return () => { cancelled = true }
+      }
+    } catch (err) {
+      console.warn('Failed to load activity state:', err)
+      setActivityItems([])
+    }
+  }, [isConnected, activeKey, recordActivityFinal])
+
+  // Persist activity to localStorage
+  useEffect(() => {
+    if (!isConnected || !activeKey) return
+    const storageKey = `${ACTIVITY_STATE_KEY_PREFIX}:${CHAIN_NAME}:${activeKey.toLowerCase()}`
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(activityItems.slice(0, ACTIVITY_MAX_ITEMS)))
+    } catch (err) {
+      console.warn('Failed to save activity state:', err)
+    }
+  }, [isConnected, activeKey, activityItems])
+
+  const refreshActivity = useCallback(async () => {
+    if (!isConnected || !activeKey) return
+    const pending = activityItems.filter(i => i.status === 'pending').slice(0, 10)
+    if (pending.length === 0) return
+
+    setIsRefreshingActivity(true)
+    try {
+      await Promise.all(
+        pending.map(async (item) => {
+          const refreshed = await fetchDeployActivityStatus(item.hash)
+          if (refreshed.status !== 'pending') {
+            recordActivityFinal(item.hash, refreshed.status, refreshed.error)
+          }
+        })
+      )
+    } finally {
+      setIsRefreshingActivity(false)
+    }
+  }, [isConnected, activeKey, activityItems, recordActivityFinal])
 
   // Simple hash routing for top nav
   useEffect(() => {
@@ -590,7 +726,8 @@ function App() {
     contractPackageHashHex: string,
     entryPoint: string,
     args: RuntimeArgs,
-    setTxState: (state: TxState) => void
+    setTxState: (state: TxState) => void,
+    activityLabel?: string
   ): Promise<boolean> => {
     if (!provider || !activeKey) return false
 
@@ -624,21 +761,24 @@ function App() {
 
       const deployHash = await casperClient.putDeploy(signedDeploy)
       setTxState({ status: 'pending', hash: deployHash })
+      if (activityLabel) recordActivityPending(activityLabel, deployHash)
 
       // Poll for completion using jsonRpc helper
       const confirmResult = await waitForDeployConfirmation(deployHash)
       if (confirmResult.success) {
         setTxState({ status: 'success', hash: deployHash })
+        if (activityLabel) recordActivityFinal(deployHash, 'success')
         return true
       } else {
         setTxState({ status: 'error', hash: deployHash, error: confirmResult.errorMessage || 'Execution failed' })
+        if (activityLabel) recordActivityFinal(deployHash, 'error', confirmResult.errorMessage || 'Execution failed')
         return false
       }
     } catch (err) {
       setTxState({ status: 'error', error: err instanceof Error ? err.message : 'Unknown error' })
       return false
     }
-  }, [provider, activeKey, casperClient])
+  }, [provider, activeKey, casperClient, recordActivityPending, recordActivityFinal])
 
   // Build and send payable deploy (with attached CSPR)
   const buildAndSendPayableDeploy = useCallback(async (
@@ -646,7 +786,8 @@ function App() {
     entryPoint: string,
     args: RuntimeArgs,
     attachedMotes: bigint,
-    setTxState: (state: TxState) => void
+    setTxState: (state: TxState) => void,
+    activityLabel?: string
   ): Promise<boolean> => {
     if (!provider || !activeKey) return false
     if (!proxyCallerWasmBytes) {
@@ -705,21 +846,24 @@ function App() {
 
       const deployHash = await casperClient.putDeploy(signedDeploy)
       setTxState({ status: 'pending', hash: deployHash })
+      if (activityLabel) recordActivityPending(activityLabel, deployHash)
 
       // Poll for completion using jsonRpc helper
       const confirmResult = await waitForDeployConfirmation(deployHash)
       if (confirmResult.success) {
         setTxState({ status: 'success', hash: deployHash })
+        if (activityLabel) recordActivityFinal(deployHash, 'success')
         return true
       } else {
         setTxState({ status: 'error', hash: deployHash, error: confirmResult.errorMessage || 'Execution failed' })
+        if (activityLabel) recordActivityFinal(deployHash, 'error', confirmResult.errorMessage || 'Execution failed')
         return false
       }
     } catch (err) {
       setTxState({ status: 'error', error: err instanceof Error ? err.message : 'Unknown error' })
       return false
     }
-  }, [provider, activeKey, proxyCallerWasmBytes, casperClient])
+  }, [provider, activeKey, proxyCallerWasmBytes, casperClient, recordActivityPending, recordActivityFinal])
 
   // Connect wallet
   const connect = useCallback(async () => {
@@ -754,6 +898,13 @@ function App() {
       setCsprTotalMotes(0n)
       setCsprAvailableMotes(0n)
       setCsprHeldMotes(0n)
+      setDepositTx({ status: 'idle' })
+      setBorrowTx({ status: 'idle' })
+      setApproveTx({ status: 'idle' })
+      setRepayTx({ status: 'idle' })
+      setWithdrawTx({ status: 'idle' })
+      setFinalizeTx({ status: 'idle' })
+      setActivityItems([])
     } catch (err) {
       console.error('Disconnect error:', err)
     }
@@ -776,7 +927,7 @@ function App() {
 
     const args = RuntimeArgs.fromMap({})
 
-    const success = await buildAndSendPayableDeploy(magniPackageHashHex, 'deposit', args, amountMotes, setDepositTx)
+    const success = await buildAndSendPayableDeploy(magniPackageHashHex, 'deposit', args, amountMotes, setDepositTx, 'Deposit')
     if (success) {
       // Update state (auto-saved to localStorage via useEffect)
       setCollateralMotes(prev => prev + amountMotes)
@@ -796,7 +947,7 @@ function App() {
       amount_wad: CLValueBuilder.u256(borrowWadAmount.toString()),
     })
 
-    const success = await buildAndSendDeploy(magniPackageHashHex, 'borrow', args, setBorrowTx)
+    const success = await buildAndSendDeploy(magniPackageHashHex, 'borrow', args, setBorrowTx, 'Borrow')
     if (success) {
       // Update state (auto-saved to localStorage via useEffect)
       setDebtWad(prev => prev + borrowWadAmount)
@@ -822,7 +973,7 @@ function App() {
       amount: CLValueBuilder.u256(repayWadAmount.toString()),
     })
 
-    await buildAndSendDeploy(mcsprPackageHashHex, 'approve', args, setApproveTx)
+    await buildAndSendDeploy(mcsprPackageHashHex, 'approve', args, setApproveTx, 'Approve')
   }, [activeKey, repayAmount, debtWad, mcsprPackageHashHex, magniPackageHashHex, buildAndSendDeploy])
 
   // Repay mCSPR debt
@@ -840,7 +991,7 @@ function App() {
       amount_wad: CLValueBuilder.u256(repayWadAmount.toString()),
     })
 
-    const success = await buildAndSendDeploy(magniPackageHashHex, 'repay', args, setRepayTx)
+    const success = await buildAndSendDeploy(magniPackageHashHex, 'repay', args, setRepayTx, 'Repay')
     if (success) {
       // Update state (auto-saved to localStorage via useEffect)
       setDebtWad(prev => prev > repayWadAmount ? prev - repayWadAmount : 0n)
@@ -862,7 +1013,7 @@ function App() {
       amount_motes: CLValueBuilder.u512(withdrawMotes.toString()),
     })
 
-    const success = await buildAndSendDeploy(magniPackageHashHex, 'request_withdraw', args, setWithdrawTx)
+    const success = await buildAndSendDeploy(magniPackageHashHex, 'request_withdraw', args, setWithdrawTx, 'Withdraw')
     if (success) {
       // Update state (auto-saved to localStorage via useEffect)
       setCollateralMotes(prev => prev > withdrawMotes ? prev - withdrawMotes : 0n)
@@ -878,7 +1029,7 @@ function App() {
 
     const args = RuntimeArgs.fromMap({})
 
-    const success = await buildAndSendDeploy(magniPackageHashHex, 'finalize_withdraw', args, setFinalizeTx)
+    const success = await buildAndSendDeploy(magniPackageHashHex, 'finalize_withdraw', args, setFinalizeTx, 'Finalize')
     if (success) {
       // Update state (auto-saved to localStorage via useEffect)
       setPendingWithdrawMotes(BigInt(0))
@@ -924,15 +1075,6 @@ function App() {
     repayTx.status === 'pending' || repayTx.status === 'signing' ||
     withdrawTx.status === 'pending' || withdrawTx.status === 'signing' ||
     finalizeTx.status === 'pending' || finalizeTx.status === 'signing'
-
-  const txList = [
-    { label: 'Deposit', tx: depositTx },
-    { label: 'Borrow', tx: borrowTx },
-    { label: 'Approve', tx: approveTx },
-    { label: 'Repay', tx: repayTx },
-    { label: 'Withdraw', tx: withdrawTx },
-    { label: 'Finalize', tx: finalizeTx },
-  ].filter(({ tx }) => tx.status !== 'idle')
 
   return (
     <div className="app">
@@ -1045,29 +1187,41 @@ function App() {
             </div>
 
             <div className="card">
-              <h2>Activity</h2>
-              {txList.length === 0 ? (
-                <p className="no-position">No recent transactions in this session.</p>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <h2 style={{ margin: 0 }}>Activity</h2>
+                <button
+                  type="button"
+                  className="btn btn-outline btn-small"
+                  onClick={() => void refreshActivity()}
+                  disabled={!isConnected || isRefreshingActivity}
+                  title={!isConnected ? 'Connect wallet to refresh activity.' : undefined}
+                >
+                  {isRefreshingActivity ? 'Refreshing...' : 'Refresh'}
+                </button>
+              </div>
+
+              {!isConnected ? (
+                <p className="no-position">Connect your wallet to see activity.</p>
+              ) : activityItems.length === 0 ? (
+                <p className="no-position">No transactions yet.</p>
               ) : (
                 <div className="tx-list">
-                  {txList.map(({ label, tx }) => (
-                    <div key={`${label}-${tx.hash || tx.status}`} className="tx-list-row">
+                  {activityItems.map((item) => (
+                    <div key={item.hash} className="tx-list-row">
                       <div className="tx-list-left">
-                        <span className="tx-pill">{label}</span>
-                        <span className="tx-list-status">{tx.status}</span>
+                        <span className="tx-pill">{item.label}</span>
+                        <span className="tx-list-status" title={item.error}>
+                          {item.status}{item.timestamp ? ` · ${new Date(item.timestamp).toLocaleString()}` : ''}
+                        </span>
                       </div>
-                      {tx.hash ? (
-                        <a
-                          href={`${TESTNET_EXPLORER}/deploy/${tx.hash}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="tx-list-link"
-                        >
-                          {truncateHash(tx.hash)}
-                        </a>
-                      ) : (
-                        <span className="tx-list-link">—</span>
-                      )}
+                      <a
+                        href={`${TESTNET_EXPLORER}/deploy/${item.hash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="tx-list-link"
+                      >
+                        {truncateHash(item.hash)}
+                      </a>
                     </div>
                   ))}
                 </div>
