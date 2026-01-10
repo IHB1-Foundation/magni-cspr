@@ -60,6 +60,7 @@ fn main() {
     let should_deploy = mode == "deploy" || mode == "deploy_and_demo";
     let should_demo = mode == "demo" || mode == "deploy_and_demo";
     let should_finalize = mode == "finalize";
+    let should_query = mode == "query";
 
     let gas_fallback = read_u64_env("ODRA_CASPER_LIVENET_GAS", DEFAULT_DEPLOY_GAS_TOKEN_MOTES);
     let deploy_gas_token = read_u64_env("ODRA_CASPER_LIVENET_DEPLOY_GAS_TOKEN", gas_fallback);
@@ -150,27 +151,33 @@ fn main() {
     };
 
     // ==========================================
-    // Step 3: Set mCSPR minter to Magni (best-effort)
+    // Step 3: Set mCSPR minter to Magni (best-effort, skip in query mode)
     // ==========================================
-    println!("[STEP 3] Ensuring mCSPR minter is Magni...");
-    env.set_gas(call_gas);
-    let mut mcspr = MCSPRTokenHostRef::new(mcspr_addr, env.clone());
-    let current_minter = mcspr.minter();
-    if current_minter == Some(magni_addr) {
-        println!("[OK] mCSPR minter already set to Magni.");
+    let mcspr = if should_query {
+        println!("[STEP 3] Skipping minter check (query mode)...");
+        MCSPRTokenHostRef::new(mcspr_addr, env.clone())
     } else {
-        // This will only succeed if the caller is the current minter (typically during fresh deploy).
-        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            mcspr.set_minter(magni_addr);
-        }));
-        match res {
-            Ok(_) => println!("[OK] mCSPR minter updated to: {:?}", mcspr.minter()),
-            Err(_) => println!(
-                "[WARN] Could not update minter (current={:?}). If this is a reused deployment, ensure mCSPR minter is Magni.",
-                current_minter
-            ),
+        println!("[STEP 3] Ensuring mCSPR minter is Magni...");
+        env.set_gas(call_gas);
+        let mut mcspr = MCSPRTokenHostRef::new(mcspr_addr, env.clone());
+        let current_minter = mcspr.minter();
+        if current_minter == Some(magni_addr) {
+            println!("[OK] mCSPR minter already set to Magni.");
+        } else {
+            // This will only succeed if the caller is the current minter (typically during fresh deploy).
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                mcspr.set_minter(magni_addr);
+            }));
+            match res {
+                Ok(_) => println!("[OK] mCSPR minter updated to: {:?}", mcspr.minter()),
+                Err(_) => println!(
+                    "[WARN] Could not update minter (current={:?}). If this is a reused deployment, ensure mCSPR minter is Magni.",
+                    current_minter
+                ),
+            }
         }
-    }
+        mcspr
+    };
     println!();
 
     // ==========================================
@@ -241,6 +248,34 @@ fn main() {
                 print_position_info(&magni, caller, &mcspr);
             }
         }
+    }
+
+    // ==========================================
+    // Query mode: Output position as JSON
+    // ==========================================
+    if should_query {
+        let magni = MagniHostRef::new(magni_addr, env.clone());
+
+        // Get the user address to query (default: caller)
+        // For now, always query the caller (the key owner)
+        let query_user = env.caller();
+
+        let pos = magni.get_position(query_user);
+        let mcspr_balance = mcspr.balance_of(query_user);
+
+        // Output as JSON to stdout
+        println!("MAGNI_POSITION_JSON={{\"collateral_motes\":\"{}\",\"collateral_wad\":\"{}\",\"debt_wad\":\"{}\",\"ltv_bps\":{},\"health_factor\":{},\"pending_withdraw_motes\":\"{}\",\"status\":{},\"mcspr_balance\":\"{}\",\"user\":\"{:?}\"}}",
+            pos.collateral_motes,
+            pos.collateral_wad,
+            pos.debt_wad,
+            pos.ltv_bps,
+            pos.health_factor,
+            pos.pending_withdraw_motes,
+            pos.status,
+            mcspr_balance,
+            query_user
+        );
+        return;
     }
 
     output_deploy_json(mcspr_addr, magni_addr, validator_public_key);

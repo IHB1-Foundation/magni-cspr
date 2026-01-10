@@ -426,6 +426,18 @@ function App() {
     }
   }, [activeKey])
 
+  // Manual position sync - for recovering position after deposit when localStorage wasn't available
+  const syncPositionFromDeposit = useCallback((cspr: number) => {
+    const motes = BigInt(cspr) * ONE_CSPR
+    setCollateralMotes(motes)
+    setVaultStatus(VaultStatus.Active)
+    setDebtWad(0n)
+    setLtvBps(0n)
+    setPendingWithdrawMotes(0n)
+    setMCSPRBalance(0n)
+    console.log('[syncPositionFromDeposit] Set collateral to', cspr, 'CSPR')
+  }, [])
+
   // Load vault state on wallet connect
   useEffect(() => {
     if (!isConnected || !activeKey) return
@@ -1148,6 +1160,9 @@ function App() {
 
             <div className={`card ${vaultStatus !== VaultStatus.None ? 'connected' : ''}`}>
               <h2>Vault Position</h2>
+              <p style={{ fontSize: '0.85em', color: '#888', marginBottom: 12 }}>
+                Note: Position is tracked locally. If you deposited before, click "Sync 500 CSPR" to restore your position.
+              </p>
 
               {vaultStatus !== VaultStatus.None ? (
                 <div className="position-summary">
@@ -1182,7 +1197,17 @@ function App() {
                   )}
                 </div>
               ) : (
-                <p className="no-position">No vault. Deposit CSPR to create one.</p>
+                <div className="no-position">
+                  <p>No vault. Deposit CSPR to create one.</p>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-small"
+                    onClick={() => syncPositionFromDeposit(500)}
+                    style={{ marginTop: 8 }}
+                  >
+                    Sync 500 CSPR (if already deposited)
+                  </button>
+                </div>
               )}
             </div>
 
@@ -1586,7 +1611,17 @@ function App() {
                   )}
                 </div>
               ) : (
-                <p className="no-position">No vault. Deposit CSPR to create one.</p>
+                <div className="no-position">
+                  <p>No vault. Deposit CSPR to create one.</p>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-small"
+                    onClick={() => syncPositionFromDeposit(500)}
+                    style={{ marginTop: 8 }}
+                  >
+                    Sync 500 CSPR (if already deposited)
+                  </button>
+                </div>
               )}
             </div>
           )}
