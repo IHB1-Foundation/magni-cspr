@@ -24,6 +24,11 @@ const MCSPR_HASH = import.meta.env.VITE_MCSPR_CONTRACT_HASH || generatedConfig.m
 const MAGNI_HASH = import.meta.env.VITE_MAGNI_CONTRACT_HASH || generatedConfig.magniContractHash || ''
 const VALIDATOR_KEY = import.meta.env.VITE_DEFAULT_VALIDATOR_PUBLIC_KEY || generatedConfig.defaultValidatorPublicKey || ''
 
+// Contract event URefs (CES - Casper Event Standard)
+// These are from the deployed Magni V2 contract named keys
+const EVENTS_UREF = 'uref-5fdbe2c7bc6e509c482d0d80c93ebf8a2ec39391bc01b43e464271cae945cbca-007'
+const EVENTS_LENGTH_UREF = 'uref-b54a9d43fbc89856b2afe1b1ac8d7a041eadb7bb1eba6802f8f002a4506b98aa-007'
+
 const TESTNET_EXPLORER = 'https://testnet.cspr.live'
 const NETWORK_LABEL =
   CHAIN_NAME === 'casper'
@@ -173,6 +178,23 @@ function extractFirstHex32(input: string): string | null {
 
 function hexToBytes(hex: string): Uint8Array {
   return Uint8Array.from(Buffer.from(hex, 'hex'))
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+// Compute account hash from public key (Ed25519 or Secp256k1)
+// Uses casper-js-sdk CLPublicKey.toAccountHash() which computes blake2b256(prefix + 0x00 + raw_public_key)
+function computeAccountHash(publicKeyHex: string): string {
+  try {
+    const clPubKey = CLPublicKey.fromHex(publicKeyHex)
+    const accountHash = clPubKey.toAccountHash()
+    return bytesToHex(accountHash)
+  } catch (err) {
+    console.error('[computeAccountHash] Failed:', err)
+    return ''
+  }
 }
 
 type JsonRpcSuccess<T> = { jsonrpc: '2.0'; id: number | string; result: T }
@@ -347,6 +369,314 @@ function loadVaultState(activeKey: string): PersistedVaultState | null {
   }
 }
 
+// ============ Contract Event Fetching (CES) ============
+
+interface VaultStateFromEvents {
+  collateralMotes: bigint
+  debtWad: bigint
+  pendingWithdrawMotes: bigint
+  vaultStatus: VaultStatusType
+}
+
+// Get current state root hash
+async function getStateRootHash(): Promise<string> {
+  const result = await jsonRpc<{ state_root_hash: string }>('chain_get_state_root_hash', [])
+  return result.state_root_hash
+}
+
+// Get events length from contract
+async function getEventsLength(): Promise<number> {
+  try {
+    const result = await jsonRpc<{
+      stored_value: { CLValue: { parsed: number } }
+    }>('query_global_state', {
+      state_identifier: null,
+      key: EVENTS_LENGTH_UREF,
+      path: [],
+    })
+    return result.stored_value.CLValue.parsed
+  } catch (err) {
+    console.error('[getEventsLength] Failed:', err)
+    return 0
+  }
+}
+
+// Get event at index from dictionary
+async function getEventAtIndex(stateRootHash: string, index: number): Promise<Uint8Array | null> {
+  try {
+    const result = await jsonRpc<{
+      stored_value: { CLValue: { bytes: string } }
+    }>('state_get_dictionary_item', {
+      state_root_hash: stateRootHash,
+      dictionary_identifier: {
+        URef: {
+          seed_uref: EVENTS_UREF,
+          dictionary_item_key: index.toString(),
+        },
+      },
+    })
+
+    // The bytes are the raw List<u8> which contains the CES event
+    const bytesHex = result.stored_value.CLValue.bytes
+    // Skip the first 4 bytes (length prefix of the List<u8>)
+    const eventBytesHex = bytesHex.slice(8) // 4 bytes = 8 hex chars
+    return hexToBytes(eventBytesHex)
+  } catch (err) {
+    console.error(`[getEventAtIndex] Failed for index ${index}:`, err)
+    return null
+  }
+}
+
+// Parse U512 from bytes (Casper serialization: 1 byte length + LE value bytes)
+function parseU512(data: Uint8Array, offset: number): { value: bigint; bytesRead: number } {
+  const length = data[offset]
+  if (length === 0) return { value: 0n, bytesRead: 1 }
+
+  let value = 0n
+  for (let i = 0; i < length; i++) {
+    value |= BigInt(data[offset + 1 + i]) << BigInt(i * 8)
+  }
+  return { value, bytesRead: 1 + length }
+}
+
+// Parse U256 from bytes (same format as U512)
+function parseU256(data: Uint8Array, offset: number): { value: bigint; bytesRead: number } {
+  return parseU512(data, offset) // Same format
+}
+
+// Event types we care about
+type ParsedEvent =
+  | { type: 'Deposited'; user: string; amountMotes: bigint; newCollateralMotes: bigint }
+  | { type: 'Borrowed'; user: string; amountWad: bigint; newDebtWad: bigint }
+  | { type: 'Repaid'; user: string; amountWad: bigint; newDebtWad: bigint }
+  | { type: 'WithdrawRequested'; user: string; amountMotes: bigint }
+  | { type: 'WithdrawFinalized'; user: string; amountMotes: bigint }
+  | { type: 'Unknown'; name: string }
+
+// Parse a CES event from bytes
+function parseCESEvent(eventBytes: Uint8Array): ParsedEvent {
+  // CES event format:
+  // - u32 event_name_length (4 bytes LE)
+  // - event_name (utf8 string)
+  // - event data (varies by event type)
+
+  let offset = 0
+
+  // Read event name length
+  const nameLength = eventBytes[offset] | (eventBytes[offset + 1] << 8) |
+    (eventBytes[offset + 2] << 16) | (eventBytes[offset + 3] << 24)
+  offset += 4
+
+  // Read event name
+  const nameBytes = eventBytes.slice(offset, offset + nameLength)
+  const eventName = new TextDecoder().decode(nameBytes)
+  offset += nameLength
+
+  console.log(`[parseCESEvent] Event name: "${eventName}", offset after name: ${offset}`)
+
+  // Parse based on event type
+  if (eventName === 'event_Deposited') {
+    // Address type tag (0 = AccountHash, 1 = ContractPackageHash)
+    const addressTag = eventBytes[offset]
+    offset += 1
+
+    // Account hash (32 bytes)
+    const userHash = bytesToHex(eventBytes.slice(offset, offset + 32))
+    offset += 32
+
+    // amount_motes (U512)
+    const amountResult = parseU512(eventBytes, offset)
+    offset += amountResult.bytesRead
+
+    // new_collateral_motes (U512)
+    const newCollateralResult = parseU512(eventBytes, offset)
+
+    return {
+      type: 'Deposited',
+      user: userHash,
+      amountMotes: amountResult.value,
+      newCollateralMotes: newCollateralResult.value,
+    }
+  }
+
+  if (eventName === 'event_Borrowed') {
+    const addressTag = eventBytes[offset]
+    offset += 1
+
+    const userHash = bytesToHex(eventBytes.slice(offset, offset + 32))
+    offset += 32
+
+    const amountResult = parseU256(eventBytes, offset)
+    offset += amountResult.bytesRead
+
+    const newDebtResult = parseU256(eventBytes, offset)
+
+    return {
+      type: 'Borrowed',
+      user: userHash,
+      amountWad: amountResult.value,
+      newDebtWad: newDebtResult.value,
+    }
+  }
+
+  if (eventName === 'event_Repaid') {
+    const addressTag = eventBytes[offset]
+    offset += 1
+
+    const userHash = bytesToHex(eventBytes.slice(offset, offset + 32))
+    offset += 32
+
+    const amountResult = parseU256(eventBytes, offset)
+    offset += amountResult.bytesRead
+
+    const newDebtResult = parseU256(eventBytes, offset)
+
+    return {
+      type: 'Repaid',
+      user: userHash,
+      amountWad: amountResult.value,
+      newDebtWad: newDebtResult.value,
+    }
+  }
+
+  if (eventName === 'event_WithdrawRequested') {
+    const addressTag = eventBytes[offset]
+    offset += 1
+
+    const userHash = bytesToHex(eventBytes.slice(offset, offset + 32))
+    offset += 32
+
+    const amountResult = parseU512(eventBytes, offset)
+
+    return {
+      type: 'WithdrawRequested',
+      user: userHash,
+      amountMotes: amountResult.value,
+    }
+  }
+
+  if (eventName === 'event_WithdrawFinalized') {
+    const addressTag = eventBytes[offset]
+    offset += 1
+
+    const userHash = bytesToHex(eventBytes.slice(offset, offset + 32))
+    offset += 32
+
+    const amountResult = parseU512(eventBytes, offset)
+
+    return {
+      type: 'WithdrawFinalized',
+      user: userHash,
+      amountMotes: amountResult.value,
+    }
+  }
+
+  return { type: 'Unknown', name: eventName }
+}
+
+// Fetch vault state from contract events
+async function fetchVaultStateFromEvents(userAccountHashHex: string): Promise<VaultStateFromEvents | null> {
+  console.log('[fetchVaultStateFromEvents] Fetching for user:', userAccountHashHex)
+
+  try {
+    // Get events length
+    const eventsLength = await getEventsLength()
+    console.log('[fetchVaultStateFromEvents] Events length:', eventsLength)
+
+    if (eventsLength === 0) {
+      return null
+    }
+
+    // Get state root hash
+    const stateRootHash = await getStateRootHash()
+    console.log('[fetchVaultStateFromEvents] State root:', stateRootHash)
+
+    // Track user state from events
+    let collateralMotes = 0n
+    let debtWad = 0n
+    let pendingWithdrawMotes = 0n
+    let vaultStatus: VaultStatusType = VaultStatus.None
+    let foundUserEvent = false
+
+    // Fetch and process all events (most recent state wins for deposit/borrow amounts)
+    for (let i = 0; i < eventsLength; i++) {
+      const eventBytes = await getEventAtIndex(stateRootHash, i)
+      if (!eventBytes) continue
+
+      const event = parseCESEvent(eventBytes)
+      console.log(`[fetchVaultStateFromEvents] Event ${i}:`, event)
+
+      // Check if event belongs to this user
+      const eventUser = 'user' in event ? event.user.toLowerCase() : null
+      if (!eventUser || eventUser !== userAccountHashHex.toLowerCase()) {
+        console.log(`[fetchVaultStateFromEvents] Event ${i} not for this user (event user: ${eventUser})`)
+        continue
+      }
+
+      foundUserEvent = true
+
+      switch (event.type) {
+        case 'Deposited':
+          // Use the new_collateral_motes from event as authoritative state
+          collateralMotes = event.newCollateralMotes
+          vaultStatus = VaultStatus.Active
+          break
+
+        case 'Borrowed':
+          debtWad = event.newDebtWad
+          break
+
+        case 'Repaid':
+          debtWad = event.newDebtWad
+          break
+
+        case 'WithdrawRequested':
+          pendingWithdrawMotes = event.amountMotes
+          vaultStatus = VaultStatus.Withdrawing
+          // Collateral is reduced when withdraw is requested
+          collateralMotes = collateralMotes > event.amountMotes
+            ? collateralMotes - event.amountMotes
+            : 0n
+          break
+
+        case 'WithdrawFinalized':
+          pendingWithdrawMotes = 0n
+          // After finalize, if no collateral left, vault is None
+          if (collateralMotes === 0n && debtWad === 0n) {
+            vaultStatus = VaultStatus.None
+          } else {
+            vaultStatus = VaultStatus.Active
+          }
+          break
+      }
+    }
+
+    if (!foundUserEvent) {
+      console.log('[fetchVaultStateFromEvents] No events found for user')
+      return null
+    }
+
+    console.log('[fetchVaultStateFromEvents] Final state:', {
+      collateralMotes: collateralMotes.toString(),
+      debtWad: debtWad.toString(),
+      pendingWithdrawMotes: pendingWithdrawMotes.toString(),
+      vaultStatus,
+    })
+
+    return {
+      collateralMotes,
+      debtWad,
+      pendingWithdrawMotes,
+      vaultStatus,
+    }
+  } catch (err) {
+    console.error('[fetchVaultStateFromEvents] Error:', err)
+    return null
+  }
+}
+
+// ============ End Contract Event Fetching ============
+
 function App() {
   const [activePage, setActivePage] = useState<'deposit' | 'portfolio'>(() => {
     const hash = window.location.hash.replace('#', '')
@@ -409,20 +739,73 @@ function App() {
   const maxWithdrawWad = collateralWad > minCollateralWad ? collateralWad - minCollateralWad : 0n
   const maxWithdrawMotes = wadToMotes(maxWithdrawWad)
 
-  // Reload vault state from localStorage
-  const reloadVaultState = useCallback(() => {
+  // Loading state for vault refresh
+  const [isLoadingVault, setIsLoadingVault] = useState(false)
+
+  // Reload vault state from contract events (primary) or localStorage (fallback)
+  const reloadVaultState = useCallback(async () => {
     if (!activeKey) return
-    const cached = loadVaultState(activeKey)
-    if (cached) {
-      console.log('[reloadVaultState] Loaded:', cached)
-      setCollateralMotes(BigInt(cached.collateralMotes))
-      setDebtWad(BigInt(cached.debtWad))
-      setLtvBps(BigInt(cached.ltvBps))
-      setPendingWithdrawMotes(BigInt(cached.pendingWithdrawMotes))
-      setMCSPRBalance(BigInt(cached.mCSPRBalance))
-      setVaultStatus(cached.vaultStatus)
-    } else {
-      console.log('[reloadVaultState] No cached state found')
+
+    setIsLoadingVault(true)
+    console.log('[reloadVaultState] Starting fetch for:', activeKey)
+
+    try {
+      // Compute account hash from public key
+      const accountHash = computeAccountHash(activeKey)
+      console.log('[reloadVaultState] Account hash:', accountHash)
+
+      if (accountHash) {
+        // Try to fetch from contract events
+        const contractState = await fetchVaultStateFromEvents(accountHash)
+
+        if (contractState) {
+          console.log('[reloadVaultState] Got state from contract events:', contractState)
+          setCollateralMotes(contractState.collateralMotes)
+          setDebtWad(contractState.debtWad)
+          setPendingWithdrawMotes(contractState.pendingWithdrawMotes)
+          setVaultStatus(contractState.vaultStatus)
+
+          // Calculate LTV
+          const collateralWadValue = csprToWad(contractState.collateralMotes)
+          const ltv = collateralWadValue > 0n
+            ? (contractState.debtWad * BPS_DIVISOR) / collateralWadValue
+            : 0n
+          setLtvBps(ltv)
+
+          // mCSPR balance would need a separate query - for now keep existing
+          setIsLoadingVault(false)
+          return
+        }
+      }
+
+      // Fallback to localStorage
+      console.log('[reloadVaultState] Falling back to localStorage')
+      const cached = loadVaultState(activeKey)
+      if (cached) {
+        console.log('[reloadVaultState] Loaded from localStorage:', cached)
+        setCollateralMotes(BigInt(cached.collateralMotes))
+        setDebtWad(BigInt(cached.debtWad))
+        setLtvBps(BigInt(cached.ltvBps))
+        setPendingWithdrawMotes(BigInt(cached.pendingWithdrawMotes))
+        setMCSPRBalance(BigInt(cached.mCSPRBalance))
+        setVaultStatus(cached.vaultStatus)
+      } else {
+        console.log('[reloadVaultState] No cached state found')
+      }
+    } catch (err) {
+      console.error('[reloadVaultState] Error:', err)
+      // Try localStorage as fallback
+      const cached = loadVaultState(activeKey)
+      if (cached) {
+        setCollateralMotes(BigInt(cached.collateralMotes))
+        setDebtWad(BigInt(cached.debtWad))
+        setLtvBps(BigInt(cached.ltvBps))
+        setPendingWithdrawMotes(BigInt(cached.pendingWithdrawMotes))
+        setMCSPRBalance(BigInt(cached.mCSPRBalance))
+        setVaultStatus(cached.vaultStatus)
+      }
+    } finally {
+      setIsLoadingVault(false)
     }
   }, [activeKey])
 
@@ -438,22 +821,13 @@ function App() {
     console.log('[syncPositionFromDeposit] Set collateral to', cspr, 'CSPR')
   }, [])
 
-  // Load vault state on wallet connect
+  // Load vault state on wallet connect - try contract events first, then localStorage
   useEffect(() => {
     if (!isConnected || !activeKey) return
 
-    // Load from localStorage
-    const cached = loadVaultState(activeKey)
-    if (cached) {
-      console.log('[loadVaultState] Loaded cached state:', cached)
-      setCollateralMotes(BigInt(cached.collateralMotes))
-      setDebtWad(BigInt(cached.debtWad))
-      setLtvBps(BigInt(cached.ltvBps))
-      setPendingWithdrawMotes(BigInt(cached.pendingWithdrawMotes))
-      setMCSPRBalance(BigInt(cached.mCSPRBalance))
-      setVaultStatus(cached.vaultStatus)
-    }
-  }, [isConnected, activeKey])
+    // Try to load from contract events first
+    void reloadVaultState()
+  }, [isConnected, activeKey, reloadVaultState])
 
   // Auto-save vault state whenever it changes
   useEffect(() => {
@@ -1151,9 +1525,9 @@ function App() {
                   type="button"
                   className="btn btn-secondary btn-small"
                   onClick={() => void reloadVaultState()}
-                  disabled={!isConnected || !contractsConfigured}
+                  disabled={!isConnected || !contractsConfigured || isLoadingVault}
                 >
-                  Refresh Vault
+                  {isLoadingVault ? 'Loading...' : 'Refresh Vault'}
                 </button>
               </div>
             </div>
@@ -1299,9 +1673,9 @@ function App() {
                   type="button"
                   className="btn btn-outline btn-small"
                   onClick={() => void reloadVaultState()}
-                  disabled={!isConnected || !contractsConfigured}
+                  disabled={!isConnected || !contractsConfigured || isLoadingVault}
                 >
-                  Refresh Vault
+                  {isLoadingVault ? 'Loading...' : 'Refresh Vault'}
                 </button>
                 <button
                   type="button"
