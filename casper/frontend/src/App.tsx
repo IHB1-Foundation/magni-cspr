@@ -317,109 +317,6 @@ function loadVaultState(activeKey: string): PersistedVaultState | null {
   }
 }
 
-// Query contract dictionary item
-async function queryContractDictionary(
-  contractHash: string,
-  dictionaryName: string,
-  dictionaryItemKey: string
-): Promise<string | null> {
-  try {
-    const { state_root_hash } = await jsonRpc<{ state_root_hash: string }>('chain_get_state_root_hash', [])
-
-    const result = await jsonRpc<{
-      stored_value: {
-        CLValue?: {
-          bytes: string
-          parsed: unknown
-        }
-      }
-    }>('state_get_dictionary_item', {
-      state_root_hash,
-      dictionary_identifier: {
-        ContractNamedKey: {
-          key: `hash-${contractHash}`,
-          dictionary_name: dictionaryName,
-          dictionary_item_key: dictionaryItemKey,
-        }
-      }
-    })
-
-    if (result.stored_value?.CLValue?.parsed !== undefined) {
-      return String(result.stored_value.CLValue.parsed)
-    }
-    return null
-  } catch (err) {
-    console.debug(`[queryContractDictionary] ${dictionaryName}[${dictionaryItemKey}]:`, err)
-    return null
-  }
-}
-
-// Convert public key to account hash hex
-function publicKeyToAccountHashHex(publicKeyHex: string): string {
-  const clPublicKey = CLPublicKey.fromHex(publicKeyHex)
-  const accountHash = clPublicKey.toAccountHashStr() // "account-hash-xxxx"
-  return accountHash.replace('account-hash-', '')
-}
-
-// Fetch user's vault position from contract
-async function fetchVaultPosition(
-  magniContractHash: string,
-  mcsprContractHash: string,
-  userPublicKey: string
-): Promise<{
-  collateralMotes: bigint
-  debtWad: bigint
-  pendingWithdrawMotes: bigint
-  vaultStatus: VaultStatusType
-  mCSPRBalance: bigint
-} | null> {
-  try {
-    const accountHashHex = publicKeyToAccountHashHex(userPublicKey)
-    console.log('[fetchVaultPosition] accountHashHex:', accountHashHex)
-
-    // Query collateral
-    const collateralRaw = await queryContractDictionary(magniContractHash, 'collateral', accountHashHex)
-    const collateralMotes = collateralRaw ? BigInt(collateralRaw) : 0n
-
-    // Query debt
-    const debtRaw = await queryContractDictionary(magniContractHash, 'debt_principal', accountHashHex)
-    const debtWad = debtRaw ? BigInt(debtRaw) : 0n
-
-    // Query pending withdraw
-    const pendingRaw = await queryContractDictionary(magniContractHash, 'pending_withdraw', accountHashHex)
-    const pendingWithdrawMotes = pendingRaw ? BigInt(pendingRaw) : 0n
-
-    // Query vault status
-    const statusRaw = await queryContractDictionary(magniContractHash, 'vault_status', accountHashHex)
-    let vaultStatus: VaultStatusType = VaultStatus.None
-    if (statusRaw) {
-      const statusNum = parseInt(statusRaw, 10)
-      if (statusNum === 1) vaultStatus = VaultStatus.Active
-      else if (statusNum === 2) vaultStatus = VaultStatus.Withdrawing
-    } else if (collateralMotes > 0n) {
-      // If collateral exists but status not found, assume Active
-      vaultStatus = VaultStatus.Active
-    }
-
-    // Query mCSPR balance
-    const mCSPRRaw = await queryContractDictionary(mcsprContractHash, 'balances', accountHashHex)
-    const mCSPRBalance = mCSPRRaw ? BigInt(mCSPRRaw) : 0n
-
-    console.log('[fetchVaultPosition] result:', {
-      collateralMotes: collateralMotes.toString(),
-      debtWad: debtWad.toString(),
-      pendingWithdrawMotes: pendingWithdrawMotes.toString(),
-      vaultStatus,
-      mCSPRBalance: mCSPRBalance.toString(),
-    })
-
-    return { collateralMotes, debtWad, pendingWithdrawMotes, vaultStatus, mCSPRBalance }
-  } catch (err) {
-    console.error('[fetchVaultPosition] error:', err)
-    return null
-  }
-}
-
 function App() {
   const [activePage, setActivePage] = useState<'deposit' | 'portfolio'>(() => {
     const hash = window.location.hash.replace('#', '')
@@ -478,46 +375,31 @@ function App() {
   const maxWithdrawWad = collateralWad > minCollateralWad ? collateralWad - minCollateralWad : 0n
   const maxWithdrawMotes = wadToMotes(maxWithdrawWad)
 
-  // Refresh vault position from contract
-  const refreshVaultPosition = useCallback(async () => {
-    if (!activeKey || !magniPackageHashHex || !mcsprPackageHashHex) return
-
-    console.log('[refreshVaultPosition] Fetching vault state from contract...')
-    const position = await fetchVaultPosition(magniPackageHashHex, mcsprPackageHashHex, activeKey)
-
-    if (position) {
-      setCollateralMotes(position.collateralMotes)
-      setDebtWad(position.debtWad)
-      setPendingWithdrawMotes(position.pendingWithdrawMotes)
-      setVaultStatus(position.vaultStatus)
-      setMCSPRBalance(position.mCSPRBalance)
-
-      // Calculate LTV
-      const collWad = csprToWad(position.collateralMotes)
-      const ltv = collWad > 0n ? (position.debtWad * BPS_DIVISOR) / collWad : 0n
-      setLtvBps(ltv)
-
-      // Save to localStorage
-      saveVaultState({
-        collateralMotes: position.collateralMotes.toString(),
-        debtWad: position.debtWad.toString(),
-        ltvBps: ltv.toString(),
-        pendingWithdrawMotes: position.pendingWithdrawMotes.toString(),
-        mCSPRBalance: position.mCSPRBalance.toString(),
-        vaultStatus: position.vaultStatus,
-        activeKey,
-        timestamp: Date.now(),
-      })
+  // Reload vault state from localStorage
+  const reloadVaultState = useCallback(() => {
+    if (!activeKey) return
+    const cached = loadVaultState(activeKey)
+    if (cached) {
+      console.log('[reloadVaultState] Loaded:', cached)
+      setCollateralMotes(BigInt(cached.collateralMotes))
+      setDebtWad(BigInt(cached.debtWad))
+      setLtvBps(BigInt(cached.ltvBps))
+      setPendingWithdrawMotes(BigInt(cached.pendingWithdrawMotes))
+      setMCSPRBalance(BigInt(cached.mCSPRBalance))
+      setVaultStatus(cached.vaultStatus)
+    } else {
+      console.log('[reloadVaultState] No cached state found')
     }
-  }, [activeKey, magniPackageHashHex, mcsprPackageHashHex])
+  }, [activeKey])
 
   // Load vault state on wallet connect
   useEffect(() => {
     if (!isConnected || !activeKey) return
 
-    // First, try to load from localStorage for immediate UI
+    // Load from localStorage
     const cached = loadVaultState(activeKey)
     if (cached) {
+      console.log('[loadVaultState] Loaded cached state:', cached)
       setCollateralMotes(BigInt(cached.collateralMotes))
       setDebtWad(BigInt(cached.debtWad))
       setLtvBps(BigInt(cached.ltvBps))
@@ -525,10 +407,25 @@ function App() {
       setMCSPRBalance(BigInt(cached.mCSPRBalance))
       setVaultStatus(cached.vaultStatus)
     }
+  }, [isConnected, activeKey])
 
-    // Then fetch fresh data from contract
-    void refreshVaultPosition()
-  }, [isConnected, activeKey, refreshVaultPosition])
+  // Auto-save vault state whenever it changes
+  useEffect(() => {
+    if (!activeKey || collateralMotes === 0n && debtWad === 0n && vaultStatus === VaultStatus.None) {
+      return // Don't save empty state
+    }
+    console.log('[autoSaveVaultState] Saving state:', { collateralMotes: collateralMotes.toString(), debtWad: debtWad.toString(), vaultStatus })
+    saveVaultState({
+      collateralMotes: collateralMotes.toString(),
+      debtWad: debtWad.toString(),
+      ltvBps: ltvBps.toString(),
+      pendingWithdrawMotes: pendingWithdrawMotes.toString(),
+      mCSPRBalance: mCSPRBalance.toString(),
+      vaultStatus,
+      activeKey,
+      timestamp: Date.now(),
+    })
+  }, [activeKey, collateralMotes, debtWad, ltvBps, pendingWithdrawMotes, mCSPRBalance, vaultStatus])
 
   // Simple hash routing for top nav
   useEffect(() => {
@@ -881,14 +778,12 @@ function App() {
 
     const success = await buildAndSendPayableDeploy(magniPackageHashHex, 'deposit', args, amountMotes, setDepositTx)
     if (success) {
-      // Optimistic update
+      // Update state (auto-saved to localStorage via useEffect)
       setCollateralMotes(prev => prev + amountMotes)
       setVaultStatus(VaultStatus.Active)
       void refreshCsprBalance()
-      // Fetch actual state from contract after a short delay
-      setTimeout(() => void refreshVaultPosition(), 3000)
     }
-  }, [activeKey, depositAmount, magniPackageHashHex, buildAndSendPayableDeploy, refreshCsprBalance, refreshVaultPosition])
+  }, [activeKey, depositAmount, magniPackageHashHex, buildAndSendPayableDeploy, refreshCsprBalance])
 
   // Borrow mCSPR
   const handleBorrow = useCallback(async () => {
@@ -903,16 +798,15 @@ function App() {
 
     const success = await buildAndSendDeploy(magniPackageHashHex, 'borrow', args, setBorrowTx)
     if (success) {
-      // Optimistic update
+      // Update state (auto-saved to localStorage via useEffect)
       setDebtWad(prev => prev + borrowWadAmount)
       setMCSPRBalance(prev => prev + borrowWadAmount)
       const newDebt = debtWad + borrowWadAmount
       const ltv = collateralWad > 0n ? (newDebt * BPS_DIVISOR) / collateralWad : 0n
       setLtvBps(ltv)
       void refreshCsprBalance()
-      setTimeout(() => void refreshVaultPosition(), 3000)
     }
-  }, [activeKey, borrowAmount, debtWad, collateralWad, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance, refreshVaultPosition])
+  }, [activeKey, borrowAmount, debtWad, collateralWad, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance])
 
   // Approve mCSPR for repay
   const handleApprove = useCallback(async () => {
@@ -948,16 +842,15 @@ function App() {
 
     const success = await buildAndSendDeploy(magniPackageHashHex, 'repay', args, setRepayTx)
     if (success) {
-      // Optimistic update
+      // Update state (auto-saved to localStorage via useEffect)
       setDebtWad(prev => prev > repayWadAmount ? prev - repayWadAmount : 0n)
       setMCSPRBalance(prev => prev > repayWadAmount ? prev - repayWadAmount : 0n)
       const newDebt = debtWad - repayWadAmount
       const ltv = collateralWad > 0n ? (newDebt * BPS_DIVISOR) / collateralWad : 0n
       setLtvBps(ltv)
       void refreshCsprBalance()
-      setTimeout(() => void refreshVaultPosition(), 3000)
     }
-  }, [activeKey, repayAmount, debtWad, collateralWad, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance, refreshVaultPosition])
+  }, [activeKey, repayAmount, debtWad, collateralWad, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance])
 
   // Request withdraw
   const handleRequestWithdraw = useCallback(async () => {
@@ -971,14 +864,13 @@ function App() {
 
     const success = await buildAndSendDeploy(magniPackageHashHex, 'request_withdraw', args, setWithdrawTx)
     if (success) {
-      // Optimistic update
+      // Update state (auto-saved to localStorage via useEffect)
       setCollateralMotes(prev => prev > withdrawMotes ? prev - withdrawMotes : 0n)
       setPendingWithdrawMotes(withdrawMotes)
       setVaultStatus(VaultStatus.Withdrawing)
       void refreshCsprBalance()
-      setTimeout(() => void refreshVaultPosition(), 3000)
     }
-  }, [activeKey, withdrawAmount, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance, refreshVaultPosition])
+  }, [activeKey, withdrawAmount, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance])
 
   // Finalize withdraw
   const handleFinalizeWithdraw = useCallback(async () => {
@@ -988,7 +880,7 @@ function App() {
 
     const success = await buildAndSendDeploy(magniPackageHashHex, 'finalize_withdraw', args, setFinalizeTx)
     if (success) {
-      // Optimistic update
+      // Update state (auto-saved to localStorage via useEffect)
       setPendingWithdrawMotes(BigInt(0))
       if (collateralMotes === BigInt(0) && debtWad === BigInt(0)) {
         setVaultStatus(VaultStatus.None)
@@ -996,9 +888,8 @@ function App() {
         setVaultStatus(VaultStatus.Active)
       }
       void refreshCsprBalance()
-      setTimeout(() => void refreshVaultPosition(), 3000)
     }
-  }, [activeKey, collateralMotes, debtWad, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance, refreshVaultPosition])
+  }, [activeKey, collateralMotes, debtWad, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance])
 
   // Render tx status badge
   const renderTxStatus = (tx: TxState, label: string) => {
@@ -1105,7 +996,7 @@ function App() {
                 <button
                   type="button"
                   className="btn btn-secondary btn-small"
-                  onClick={() => void refreshVaultPosition()}
+                  onClick={() => void reloadVaultState()}
                   disabled={!isConnected || !contractsConfigured}
                 >
                   Refresh Vault
@@ -1228,7 +1119,7 @@ function App() {
                 <button
                   type="button"
                   className="btn btn-outline btn-small"
-                  onClick={() => void refreshVaultPosition()}
+                  onClick={() => void reloadVaultState()}
                   disabled={!isConnected || !contractsConfigured}
                 >
                   Refresh Vault
