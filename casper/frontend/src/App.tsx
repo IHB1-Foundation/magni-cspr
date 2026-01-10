@@ -1345,7 +1345,15 @@ function App() {
     if (!activeKey || !mcsprPackageHashHex || !magniPackageHashHex) return
 
     const repayMotes = parseCSPR(repayAmount || '0')
-    const repayWadAmount = repayMotes > 0n ? csprToWad(repayMotes) : debtWad
+    if (repayMotes === 0n) {
+      setApproveTx({ status: 'error', error: 'Enter an amount to approve' })
+      return
+    }
+    let repayWadAmount = csprToWad(repayMotes)
+    // Cap at current debt
+    if (repayWadAmount > debtWad) {
+      repayWadAmount = debtWad
+    }
 
     const args = RuntimeArgs.fromMap({
       spender: CLValueBuilder.key(
@@ -1362,7 +1370,11 @@ function App() {
     if (!activeKey || !magniPackageHashHex) return
 
     const repayMotes = parseCSPR(repayAmount || '0')
-    let repayWadAmount = repayMotes > 0n ? csprToWad(repayMotes) : debtWad
+    if (repayMotes === 0n) {
+      setRepayTx({ status: 'error', error: 'Enter an amount to repay' })
+      return
+    }
+    let repayWadAmount = csprToWad(repayMotes)
     // Cap at current debt
     if (repayWadAmount > debtWad) {
       repayWadAmount = debtWad
@@ -1743,9 +1755,18 @@ function App() {
                   type="text"
                   value={repayAmount}
                   onChange={(e) => setRepayAmount(e.target.value)}
-                  placeholder="Leave empty for max"
+                  placeholder="Amount in mCSPR"
                   disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending}
                 />
+                <button
+                  type="button"
+                  className="btn btn-outline btn-small"
+                  onClick={() => setRepayAmount(formatWad(debtWad))}
+                  disabled={!isConnected || debtWad === 0n || isAnyTxPending}
+                  style={{ marginLeft: 8 }}
+                >
+                  Max
+                </button>
                 <span className="input-suffix">mCSPR</span>
               </div>
               <div className="step-actions">
