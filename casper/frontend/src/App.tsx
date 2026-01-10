@@ -1315,12 +1315,11 @@ function App() {
 
     const success = await buildAndSendPayableDeploy(magniPackageHashHex, 'deposit', args, amountMotes, setDepositTx, 'Deposit')
     if (success) {
-      // Update state (auto-saved to localStorage via useEffect)
-      setCollateralMotes(prev => prev + amountMotes)
-      setVaultStatus(VaultStatus.Active)
+      // Refresh from contract events to get authoritative state
+      void reloadVaultState()
       void refreshCsprBalance()
     }
-  }, [activeKey, depositAmount, magniPackageHashHex, buildAndSendPayableDeploy, refreshCsprBalance])
+  }, [activeKey, depositAmount, magniPackageHashHex, buildAndSendPayableDeploy, refreshCsprBalance, reloadVaultState])
 
   // Borrow mCSPR
   const handleBorrow = useCallback(async () => {
@@ -1335,15 +1334,11 @@ function App() {
 
     const success = await buildAndSendDeploy(magniPackageHashHex, 'borrow', args, setBorrowTx, 'Borrow')
     if (success) {
-      // Update state (auto-saved to localStorage via useEffect)
-      setDebtWad(prev => prev + borrowWadAmount)
-      setMCSPRBalance(prev => prev + borrowWadAmount)
-      const newDebt = debtWad + borrowWadAmount
-      const ltv = collateralWad > 0n ? (newDebt * BPS_DIVISOR) / collateralWad : 0n
-      setLtvBps(ltv)
+      // Refresh from contract events to get authoritative state
+      void reloadVaultState()
       void refreshCsprBalance()
     }
-  }, [activeKey, borrowAmount, debtWad, collateralWad, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance])
+  }, [activeKey, borrowAmount, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance, reloadVaultState])
 
   // Approve mCSPR for repay
   const handleApprove = useCallback(async () => {
@@ -1379,15 +1374,11 @@ function App() {
 
     const success = await buildAndSendDeploy(magniPackageHashHex, 'repay', args, setRepayTx, 'Repay')
     if (success) {
-      // Update state (auto-saved to localStorage via useEffect)
-      setDebtWad(prev => prev > repayWadAmount ? prev - repayWadAmount : 0n)
-      setMCSPRBalance(prev => prev > repayWadAmount ? prev - repayWadAmount : 0n)
-      const newDebt = debtWad - repayWadAmount
-      const ltv = collateralWad > 0n ? (newDebt * BPS_DIVISOR) / collateralWad : 0n
-      setLtvBps(ltv)
+      // Refresh from contract events to get authoritative state
+      void reloadVaultState()
       void refreshCsprBalance()
     }
-  }, [activeKey, repayAmount, debtWad, collateralWad, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance])
+  }, [activeKey, repayAmount, debtWad, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance, reloadVaultState])
 
   // Request withdraw
   const handleRequestWithdraw = useCallback(async () => {
@@ -1401,13 +1392,11 @@ function App() {
 
     const success = await buildAndSendDeploy(magniPackageHashHex, 'request_withdraw', args, setWithdrawTx, 'Withdraw')
     if (success) {
-      // Update state (auto-saved to localStorage via useEffect)
-      setCollateralMotes(prev => prev > withdrawMotes ? prev - withdrawMotes : 0n)
-      setPendingWithdrawMotes(withdrawMotes)
-      setVaultStatus(VaultStatus.Withdrawing)
+      // Refresh from contract events to get authoritative state
+      void reloadVaultState()
       void refreshCsprBalance()
     }
-  }, [activeKey, withdrawAmount, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance])
+  }, [activeKey, withdrawAmount, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance, reloadVaultState])
 
   // Finalize withdraw
   const handleFinalizeWithdraw = useCallback(async () => {
@@ -1417,16 +1406,11 @@ function App() {
 
     const success = await buildAndSendDeploy(magniPackageHashHex, 'finalize_withdraw', args, setFinalizeTx, 'Finalize')
     if (success) {
-      // Update state (auto-saved to localStorage via useEffect)
-      setPendingWithdrawMotes(BigInt(0))
-      if (collateralMotes === BigInt(0) && debtWad === BigInt(0)) {
-        setVaultStatus(VaultStatus.None)
-      } else {
-        setVaultStatus(VaultStatus.Active)
-      }
+      // Refresh from contract events to get authoritative state
+      void reloadVaultState()
       void refreshCsprBalance()
     }
-  }, [activeKey, collateralMotes, debtWad, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance])
+  }, [activeKey, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance, reloadVaultState])
 
   // Render tx status badge
   const renderTxStatus = (tx: TxState, label: string) => {
