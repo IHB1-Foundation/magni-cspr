@@ -1886,6 +1886,14 @@ function App() {
                     <strong title={csprHeldMotes.toString()}>{formatCSPR(csprHeldMotes)} CSPR</strong>
                   </div>
                 )}
+                <div className="balance-display">
+                  <span>Collateral (Locked)</span>
+                  <strong title={collateralMotes.toString()}>{formatCSPR(collateralMotes)} CSPR</strong>
+                </div>
+                <div className="balance-display">
+                  <span>mCSPR Balance</span>
+                  <strong title={mCSPRBalance.toString()}>{formatWad(mCSPRBalance)} mCSPR</strong>
+                </div>
                 {csprBalanceError && <p className="error">{csprBalanceError}</p>}
                 <div className="actions">
                   <a
