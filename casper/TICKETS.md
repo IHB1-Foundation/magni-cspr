@@ -1,703 +1,724 @@
 # Tickets — Magni x Casper Hackathon Prototype (Monorepo-safe)
 
-규칙
-- 티켓은 순서대로 처리한다.
-- 각 티켓 종료 시:
-  1) (casper/magni_casper)에서 cargo odra test 실행
-  2) build도 한번 실행 (cargo odra build)
-  3) 커밋
-- /casper 밖은 절대 수정하지 않는다.
+## Rules
+- Process tickets in order.
+- At the end of each ticket:
+  1) Run `cargo odra test` in `casper/magni_casper`
+  2) Run `cargo odra build` once as well
+  3) Commit
+- Do not modify anything outside `/casper`.
 
 ---
 
-## T0. Scaffold (Odra workspace 생성)
-목표
-- /casper/magni_casper Odra workspace 생성
-- /casper/scripts 및 env 샘플 추가
+## T0. Scaffold (create Odra workspace)
 
-To Do
-- casper/magni_casper를 cargo-odra 기반 workspace로 생성
-- casper/README.md, casper/.env.example, casper/scripts/*.sh 생성
+### Goal
+- Create an Odra workspace at `/casper/magni_casper`
+- Add `/casper/scripts` and env samples
 
-DoD
-- (casper/magni_casper) `cargo odra build` 성공
-- 커밋: "casper: scaffold odra workspace"
+### To Do
+- Create `casper/magni_casper` as a cargo-odra based workspace
+- Create `casper/README.md`, `casper/.env.example`, `casper/scripts/*.sh`
+
+### DoD
+- `(casper/magni_casper) cargo odra build` succeeds
+- Commit: "casper: scaffold odra workspace"
 
 ---
 
 ## T1. Tokens (CEP-18) — tCSPR + mCSPR
-목표
-- tCSPR: faucet mint 가능한 테스트 토큰(CEP-18)
-- mCSPR: Magni만 mint/burn 가능한 토큰(CEP-18)
 
-To Do
-- tokens.rs에 CEP-18 구현
-- tCSPR에 faucet_mint(to, amount)
-- mCSPR에 set_minter(minter) 또는 init에서 minter 지정
+### Goal
+- tCSPR: a test token (CEP-18) with faucet mint
+- mCSPR: a token (CEP-18) that only Magni can mint/burn
 
-DoD
-- 단위 테스트: transfer/approve/transfer_from/faucet_mint 검증
-- 커밋: "casper: add cep-18 tokens (tCSPR, mCSPR)"
+### To Do
+- Implement CEP-18 in `tokens.rs`
+- Add `faucet_mint(to, amount)` to tCSPR
+- Add `set_minter(minter)` for mCSPR, or set the minter during init
+
+### DoD
+- Unit tests verify: transfer/approve/transfer_from/faucet_mint
+- Commit: "casper: add cep-18 tokens (tCSPR, mCSPR)"
 
 ---
 
 ## T2. Styks external ABI (Odra external_contract)
-목표
-- StyksPriceFeed를 external contract로 호출 가능하게 정의
 
-To Do
-- contracts/styks_external.rs 생성
-- Odra `#[odra::external_contract]`로 trait 정의:
-  - get_twap_price(id: String) -> Option<u64>
+### Goal
+- Define an external contract interface so `StyksPriceFeed` can be called
 
-DoD
-- 컴파일 성공 + 최소 단위 테스트(모킹/스텁 가능)
-- 커밋: "casper: add styks external contract interface"
+### To Do
+- Create `contracts/styks_external.rs`
+- Define a trait via Odra `#[odra::external_contract]`:
+  - `get_twap_price(id: String) -> Option<u64>`
+
+### DoD
+- Builds successfully + minimal unit tests (mock/stub allowed)
+- Commit: "casper: add styks external contract interface"
 
 ---
 
 ## T3. Magni core + Styks read
-목표
-- 레버리지 스테이킹 핵심 기능 + Styks TWAP price를 조회에 포함
 
-핵심 수학
+### Goal
+- Implement core leverage-staking flows, and include Styks TWAP price in views
+
+### Core math
 - LTV = 80%
 - Max Leverage = 1/(1-LTV) = 5x
 - target_leverage L (1..=5)
   - collateral_total = deposit * L
   - debt = deposit * (L - 1)
 
-To Do
-- contracts/magni.rs 구현
-  - init(tCSPR, mCSPR, styks_price_feed_package_hash, feed_id)
-  - open_position_flash(deposit_amount, target_leverage<=5)
-  - get_position(user) => collateral, debt, ltv, accrued_interest, oracle_price_option, oracle_ts(optional)
-  - close_position() => repay + withdraw
-- Styks 호출:
-  - get_position에서 styks.get_twap_price(feed_id) 호출
-  - None이면 demo가 깨지지 않게 `price_available=false` 형태로 처리
+### To Do
+- Implement `contracts/magni.rs`
+  - `init(tCSPR, mCSPR, styks_price_feed_package_hash, feed_id)`
+  - `open_position_flash(deposit_amount, target_leverage<=5)`
+  - `get_position(user) => collateral, debt, ltv, accrued_interest, oracle_price_option, oracle_ts(optional)`
+  - `close_position() => repay + withdraw`
+- Styks integration:
+  - In `get_position`, call `styks.get_twap_price(feed_id)`
+  - If `None`, avoid breaking the demo (e.g. `price_available=false`)
 
-DoD
-- 단위 테스트: L=5 open/view/close 성공
-- 커밋: "casper: integrate styks oracle into magni core"
+### DoD
+- Unit test: L=5 open/view/close succeeds
+- Commit: "casper: integrate styks oracle into magni core"
 
 ---
 
-## T4. (옵션) Liquidation + rails
-목표
-- ltv 초과 시 청산(간단 버전) + caps/pause 최소 레일
+## T4. (Optional) Liquidation + rails
 
-DoD
-- 테스트 2개(가능/불가)
-- 커밋: "casper: add liquidation and safety rails"
+### Goal
+- Simple liquidation when LTV exceeds max + minimal caps/pause rails
+
+### DoD
+- 2 tests (allowed / disallowed)
+- Commit: "casper: add liquidation and safety rails"
 
 ---
 
 ## T5. Testnet deploy + demo binary (Odra livenet)
-목표
-- Casper Testnet에 배포 + Styks read + 5x 데모를 원샷 실행
 
-To Do
-- src/bin/magni_livenet.rs
+### Goal
+- Deploy to Casper Testnet + Styks read + run a one-shot 5x demo
+
+### To Do
+- `src/bin/magni_livenet.rs`
   - deploy: tCSPR -> mCSPR -> Magni
   - set: mCSPR minter=Magni
-  - sanity: styks.get_twap_price(feed_id) 호출 후 로그 출력
+  - sanity: call `styks.get_twap_price(feed_id)` and print logs
   - demo:
     - faucet mint tCSPR -> approve -> open 5x -> view -> close
-  - 로그: 컨트랙트 주소/결과를 stdout에 출력
+  - logs: print contract addresses/results to stdout
 
-DoD
-- 컴파일 성공
-- `bash casper/scripts/livenet_deploy_and_demo.sh`로 실행 가능(환경변수 세팅만 하면 됨)
-- 커밋: "casper: add livenet deploy+styks+demo"
+### DoD
+- Builds successfully
+- Runnable via `bash casper/scripts/livenet_deploy_and_demo.sh` (only env setup required)
+- Commit: "casper: add livenet deploy+styks+demo"
 
 ---
 
 ## T6. Scripts + Docs
-목표
-- setup/build/test/deploy 스크립트 및 README 재현 절차 완성
 
-DoD
-- README 따라 실행하면 재현 가능
-- 커밋: "casper: add scripts and docs"
+### Goal
+- Complete reproducible setup/build/test/deploy scripts and README instructions
+
+### DoD
+- Reproducible by following README
+- Commit: "casper: add scripts and docs"
 
 ---
 
 ## T7. Casper Frontend (Testnet-only + Casper Wallet + delegate-stake CTA)
-목표
-- Casper Testnet만 대상으로 하는 최소 프론트엔드 추가
-- 지갑은 Casper Wallet(브라우저 확장)만 지원
-- 스테이킹 전략은 `https://cspr.live/delegate-stake`에서 “가장 위 validator”에 위임(delegate)하는 것으로 안내/유도
 
-To Do
-- `/casper/frontend` (또는 `/casper/magni_casper_frontend`)에 Vite+React 앱 스캐폴딩
-  - 네트워크/체인: Casper Testnet 고정(다른 네트워크 스위치/멀티체인 기능 제거)
-  - 지갑: Casper Wallet provider만 연결(다른 지갑 커넥터 없음)
-- 화면(최소)
+### Goal
+- Add a minimal frontend targeting Casper Testnet only
+- Support only Casper Wallet (browser extension)
+- For staking guidance: instruct users to delegate to the “top validator” via `https://cspr.live/delegate-stake`
+
+### To Do
+- Scaffold a Vite+React app under `/casper/frontend` (or `/casper/magni_casper_frontend`)
+  - Network/chain: fixed to Casper Testnet (remove multi-network/multi-chain features)
+  - Wallet: Casper Wallet provider only (no other connectors)
+- UI (minimum)
   - Connect / Disconnect
-  - 연결된 account(public key) 표시 + 복사 버튼
-  - “Delegate stake” 섹션:
-    - 기본 validator public key 표시(복사 버튼)
-    - `cspr.live/delegate-stake`로 이동 버튼(새 탭)
-    - 간단한 안내 문구: cspr.live에서 amount 입력 후 Casper Wallet로 sign/submit
-- 설정(환경변수)
+  - Show connected account (public key) + copy button
+  - “Delegate stake” section:
+    - Show default validator public key (copy button)
+    - Button to open `cspr.live/delegate-stake` (new tab)
+    - Short guidance text: enter amount on cspr.live, then sign/submit via Casper Wallet
+- Config (env vars)
   - `VITE_CASPER_CHAIN_NAME=casper-test`
-  - `VITE_CASPER_NODE_URL` (putDeploy 등 추후 확장 대비)
+  - `VITE_CASPER_NODE_URL` (for future expansion, e.g. putDeploy)
   - `VITE_DEFAULT_VALIDATOR_PUBLIC_KEY`
-    - 기본값(2026-01-10 기준, Casper Testnet `state_get_auction_info` 상위 #1):
+    - Default (as of 2026-01-10, top #1 from Casper Testnet `state_get_auction_info`):
       - `012b365e09c5d75187b4abc25c4aa28109133bab6a256ef4abe24348073e590d80`
-- 문서
-  - `casper/README.md`에 프론트 실행 방법과 “delegate-stake” 플로우 추가
+- Docs
+  - Add frontend run instructions and the delegate-stake flow to `casper/README.md`
 
-DoD
+### DoD
 - `pnpm --dir casper/frontend install`
-- `pnpm --dir casper/frontend dev`로 로컬 실행 가능
-- Casper Wallet 연결/해제 동작 확인(주소 표시까지)
-- 버튼을 통해 `https://cspr.live/delegate-stake`로 이동 가능 + validator key 복사 가능
-- 커밋: "casper: add casper testnet frontend (casper wallet + delegate-stake)"
+- `pnpm --dir casper/frontend dev` runs locally
+- Casper Wallet connect/disconnect works (shows address)
+- Can navigate to `https://cspr.live/delegate-stake` and copy the validator key
+- Commit: "casper: add casper testnet frontend (casper wallet + delegate-stake)"
 
 ---
 
 ## T8. Staking strategy config in contract (default validator) + deploy wiring
-목표
-- “가장 위 validator 1개”를 기본 전략으로 고정할 수 있게 컨트랙트/배포에 validator 정보를 반영
-- (중요) 실제 delegate/undelegate 트랜잭션은 우선 cspr.live에서 수행하는 것으로 두고, 컨트랙트는 전략(validator) 메타데이터를 노출하는 수준부터 시작
 
-To Do
+### Goal
+- Persist “top validator #1” as the default strategy and wire validator info into contract/deploy
+- (Important) For now, delegation/undelegation transactions are performed via cspr.live; the contract initially only exposes strategy metadata
+
+### To Do
 - `casper/magni_casper/src/magni.rs`
-  - `validator_public_key: Var<String>` 추가
-  - `init(..., validator_public_key: String)`로 확장 + getter `validator_public_key()` 추가
-  - (선택) `events::ValidatorSet` 이벤트 추가
+  - Add `validator_public_key: Var<String>`
+  - Extend `init(..., validator_public_key: String)` and add getter `validator_public_key()`
+  - (Optional) Add `events::ValidatorSet` event
 - `casper/magni_casper/src/bin/magni_livenet.rs`
-  - env에서 기본 validator key 읽기:
+  - Read default validator key from env:
     - `DEFAULT_VALIDATOR_PUBLIC_KEY`
-      - 기본값(2026-01-10 기준, Casper Testnet `state_get_auction_info` 상위 #1):
+      - Default (as of 2026-01-10, top #1 from Casper Testnet `state_get_auction_info`):
         - `012b365e09c5d75187b4abc25c4aa28109133bab6a256ef4abe24348073e590d80`
-      - (없으면 빈 문자열/placeholder로 fallback)
-  - Magni deploy 시 init args에 전달 + 로그 출력
+      - If missing, fall back to empty string/placeholder
+  - Pass it into Magni init args during deploy + print in logs
 - `casper/README.md` / `.env.example`
-  - `DEFAULT_VALIDATOR_PUBLIC_KEY` 항목 추가
-  - 프론트(T7)와 동일한 validator key를 쓰도록 안내
+  - Add `DEFAULT_VALIDATOR_PUBLIC_KEY`
+  - Instruct using the same validator key as the frontend (T7)
 
-Notes / Follow-ups (티켓 범위 밖, 필요 시 후속 티켓으로 분리)
-- “컨트랙트가 직접 delegate 한다”를 목표로 하면 Casper auction 시스템 컨트랙트(delegate/undelegate) 호출 가능 여부, unbonding 기간/UX(즉시 close 불가) 등을 먼저 검증해야 함.
+### Notes / Follow-ups (out of ticket scope; split into follow-up tickets if needed)
+- If the goal is “the contract delegates directly”, first verify whether the Casper auction system contract can be called for delegate/undelegate, and account for unbonding UX (close may not be immediate), etc.
 
-DoD
-- (casper/magni_casper) `cargo odra test` / `cargo odra build` 통과
-- livenet deploy 로그에 validator key가 출력되고 getter로 조회 가능
-- 커밋: "casper: wire default validator into magni contract"
+### DoD
+- `(casper/magni_casper) cargo odra test` / `cargo odra build` pass
+- Livenet deploy logs include the validator key, and it is queryable via getter
+- Commit: "casper: wire default validator into magni contract"
 
 ---
 
 ## T9. Casper dApp v1 (port key EVM frontend features to Casper + wire to Odra contracts)
-목표
-- 기존 `packages/frontend`(EVM wagmi/viem)에서 “유저가 실제로 하던 핵심 플로우”를 Casper 전용(`casper/frontend`)으로 포팅한다.
-- Casper Testnet only + Casper Wallet only 원칙 유지.
-- Casper 컨트랙트(`casper/magni_casper`)의 현재 entrypoints에 맞춰 프론트에서 직접 트랜잭션/조회가 가능해야 한다.
 
-범위(포팅 기준)
-- EVM 프론트의 개념을 Casper 버전으로 단순화해서 구현:
-  - Faucet: 테스트 토큰 민트 (EVM: faucet page) → (Casper) `tCSPR.faucet_mint`
-  - Leverage/Open: 포지션 오픈 (EVM: leverage/deposit/borrow 탭 조합) → (Casper) `tCSPR.approve` + `Magni.open_position`
-  - Portfolio/View: 포지션/잔액 조회 (EVM: portfolio/strategy detail) → (Casper) `balance_of`, `view_*`, `health_factor`, `get_price`
-  - Close/Repay: 포지션 종료 (EVM: repay+withdraw) → (Casper) `Magni.close_position`
-- Swap/Uniswap 등 EVM DEX 의존 기능은 범위에서 제외(페이지 제거 또는 “Not supported on Casper” 처리).
+### Goal
+- Port the “core user flow” from `packages/frontend` (EVM wagmi/viem) into a Casper-only app (`casper/frontend`).
+- Keep Casper Testnet only + Casper Wallet only.
+- The frontend must be able to submit transactions / query state matching current entrypoints in `casper/magni_casper`.
 
-To Do (Frontend)
-- 단일 플로우 UI로 구성(라우팅 최소화)
-  - `/` 한 페이지(또는 1개 route)에서 아래 섹션을 위→아래 순서로 제공:
+### Scope (porting baseline)
+- Implement a simplified Casper version of the EVM frontend concepts:
+  - Faucet: mint test token (EVM: faucet page) → (Casper) `tCSPR.faucet_mint`
+  - Leverage/Open: open a position (EVM: leverage/deposit/borrow tabs) → (Casper) `tCSPR.approve` + `Magni.open_position`
+  - Portfolio/View: view balances/position (EVM: portfolio/strategy detail) → (Casper) `balance_of`, `view_*`, `health_factor`, `get_price`
+  - Close/Repay: close position (EVM: repay+withdraw) → (Casper) `Magni.close_position`
+- Exclude Swap/Uniswap or other EVM DEX-dependent features (remove pages or show “Not supported on Casper”).
+
+### To Do (Frontend)
+- Single-flow UI (minimal routing)
+  - On `/` (or a single route), show sections top-to-bottom:
     1) Wallet (connect/disconnect + public key)
-    2) Contracts (contract hash 설정 상태 + 네트워크 정보)
+    2) Contracts (configured hashes + network info)
     3) Delegate stake (validator key + `cspr.live/delegate-stake` CTA)
     4) Faucet (tCSPR mint)
     5) Open Position (approve + open_position)
     6) Position / Portfolio (balances + position view + close)
-- Casper client/지갑 연결 레이어 구현
-  - Casper Wallet provider만 사용(연결/해제, active public key 가져오기)
-  - `VITE_CASPER_CHAIN_NAME=casper-test`, `VITE_CASPER_NODE_URL` 고정 사용
-  - 공통 deploy 플로우:
-    - `casper-js-sdk`(또는 동등)로 stored-contract call deploy 생성
-    - Casper Wallet로 sign
-    - node RPC로 submit + deploy hash polling(성공/실패 상태 UI 반영)
-- 컨트랙트 주소/해시 구성
-  - `.env` 기반(또는 `src/config/*.ts`):
+- Casper client / wallet connection layer
+  - Casper Wallet provider only (connect/disconnect, get active public key)
+  - Fixed `VITE_CASPER_CHAIN_NAME=casper-test`, `VITE_CASPER_NODE_URL`
+  - Common deploy flow:
+    - Build stored-contract call deploy via `casper-js-sdk` (or equivalent)
+    - Sign via Casper Wallet
+    - Submit via node RPC + poll deploy hash; reflect success/failure in UI
+- Contract addresses/hashes config
+  - From `.env` (or `src/config/*.ts`):
     - `VITE_TCSPR_CONTRACT_HASH`
     - `VITE_MCSPR_CONTRACT_HASH`
     - `VITE_MAGNI_CONTRACT_HASH`
-  - “배포 주소 세팅이 안 된 경우” UX: 안내 문구 + disabled 처리
-- 기능 구현(최소)
-  - Delegate stake 섹션:
-    - 기본 validator key 표시 + 복사 버튼
-    - `https://cspr.live/delegate-stake` 새 탭 이동 버튼
-    - validator key 결정 우선순위:
-      1) (T8 구현 시) `Magni.validator_public_key()` (빈 값이 아니면 최우선)
+  - UX when addresses are missing: show guidance + disable actions
+- Features (minimum)
+  - Delegate stake section:
+    - Show default validator key + copy button
+    - Button to open `https://cspr.live/delegate-stake` (new tab)
+    - Validator key priority:
+      1) (If T8 is implemented) `Magni.validator_public_key()` (non-empty has highest priority)
       2) `VITE_DEFAULT_VALIDATOR_PUBLIC_KEY`
-    - 간단 안내 문구: cspr.live에서 amount 입력 후 Casper Wallet로 sign/submit
-  - Faucet 섹션:
-    - amount 입력(18 decimals), `tCSPR.faucet_mint(to=connected_account, amount)` 실행
-    - `tCSPR.balance_of`로 결과 리프레시
-  - Open Position 섹션:
-    - `tCSPR.balance_of` 표시 + deposit 입력
+    - Short guidance text: enter amount on cspr.live, then sign/submit via Casper Wallet
+  - Faucet section:
+    - amount input (18 decimals), execute `tCSPR.faucet_mint(to=connected_account, amount)`
+    - refresh via `tCSPR.balance_of`
+  - Open Position section:
+    - show `tCSPR.balance_of` + deposit input
     - leverage selector: 1..=5
-    - approval 상태 조회: `tCSPR.allowance(owner=user, spender=Magni)` + approve 트랜잭션
-    - open 트랜잭션: `Magni.open_position(collateral_amount, leverage)`
-    - 오픈 후 상태 조회:
+    - approval check: `tCSPR.allowance(owner=user, spender=Magni)` + approve tx
+    - open tx: `Magni.open_position(collateral_amount, leverage)`
+    - after open, refresh:
       - `Magni.view_collateral(user)`, `Magni.view_debt(user)`, `Magni.view_leverage(user)`
       - `Magni.health_factor(user)`, `Magni.get_price()`
-  - Position / Portfolio 섹션:
-    - `tCSPR.balance_of(user)`, `mCSPR.balance_of(user)` 표시
-    - position summary(있으면): collateral/debt/leverage/health factor/price
-    - Close 버튼: `Magni.close_position()`
-    - (중요 UX) “mCSPR를 외부로 보내면 close가 실패할 수 있음(컨트랙트가 burn 실행)” 경고 문구
-- 공통 UX
-  - 기존 프론트 알림 UX(트랜잭션 pending/success/error)를 Casper tx 플로우에 맞게 재사용/포팅
-  - 입력값 파싱/포맷(18 decimals) 유틸 추가
+  - Position / Portfolio section:
+    - show `tCSPR.balance_of(user)`, `mCSPR.balance_of(user)`
+    - position summary (if present): collateral/debt/leverage/health factor/price
+    - Close button: `Magni.close_position()`
+    - (Important UX) warning: “If you transfer mCSPR out, close may fail (contract must burn).”
+- Common UX
+  - Port/replicate transaction pending/success/error UI from the old frontend for Casper tx flow
+  - Add input parsing/format utils for 18 decimals
 
-To Do (Contracts / ABI friendliness)
-- 프론트에서 다건 호출 없이 1~2번 조회로 상태를 그릴 수 있게 view helper를 추가(권장)
-  - `get_position(user)` (collateral, debt, leverage, health_factor, price) 형태로 view 제공
-  - (T8 완료 시) `validator_public_key()`도 portfolio/strategy 화면에 함께 노출
-- 위 helper 추가 시 livenet demo(`magni_livenet`)에서도 출력/검증 포함
+### To Do (Contracts / ABI friendliness)
+- Add view helper(s) so the frontend can render with 1–2 calls (recommended)
+  - Provide `get_position(user)` returning `(collateral, debt, leverage, health_factor, price)`
+  - (If T8 is done) expose `validator_public_key()` in portfolio/strategy UI
+- If helpers are added, also print/verify in livenet demo (`magni_livenet`)
 
-DoD
+### DoD
 - `pnpm --dir casper/frontend install`
-- `pnpm --dir casper/frontend dev`로 로컬 실행 가능
-- Casper Wallet로 연결 후, Casper Testnet에서 다음이 end-to-end로 동작:
-  1) faucet_mint로 tCSPR 받기
-  2) approve 후 open_position(1..=5) 성공
-  3) 포지션/잔액 조회 화면 정상 표시
-  4) close_position 성공(잔액/포지션 초기화 확인)
-- 커밋: "casper: add casper dapp v1 (faucet/open/view/close)"
+- `pnpm --dir casper/frontend dev` runs locally
+- With Casper Wallet connected, the following works end-to-end on Casper Testnet:
+  1) receive tCSPR via `faucet_mint`
+  2) approve and successfully `open_position(1..=5)`
+  3) position/balances render correctly
+  4) `close_position` succeeds (verify balances/position reset)
+- Commit: "casper: add casper dapp v1 (faucet/open/view/close)"
 
 ---
 
 ## T10. Testnet all-in-one deploy script (deploy + FE wiring + CONTRACTS.md)
-목표
-- Casper Testnet에 컨트랙트(tCSPR/mCSPR/Magni)를 배포하고, 결과 주소(컨트랙트 해시 등)를:
-  1) `casper/frontend`가 바로 읽을 수 있게 자동 반영
-  2) `casper/CONTRACTS.md`에 기록
-  를 한 번에 수행하는 올인원 배포 스크립트를 만든다.
 
-To Do
-- `casper/CONTRACTS.md` 생성
-  - 포맷(예시):
+### Goal
+- Create an all-in-one deploy script that deploys contracts (tCSPR/mCSPR/Magni) to Casper Testnet and:
+  1) automatically wires the resulting addresses/hashes into `casper/frontend`, and
+  2) appends a deployment record to `casper/CONTRACTS.md`,
+  in a single run.
+
+### To Do
+- Create `casper/CONTRACTS.md`
+  - Example format:
     - Network: Casper Testnet (`casper-test`)
     - Date (UTC)
     - Node RPC URL
     - tCSPR contract hash
     - mCSPR contract hash
     - Magni contract hash
-    - (선택) Styks: package hash + feed id
-    - (T8 완료 시) default validator public key
-- `casper/magni_casper/src/bin/magni_livenet.rs` 개선
-  - 배포 결과를 **머신리더블** 하게 출력(권장: 마지막에 JSON 한 줄 출력)
-    - 예: `MAGNI_DEPLOY_JSON={...}`
-  - JSON에는 최소 아래를 포함:
+    - (Optional) Styks: package hash + feed id
+    - (If T8 is done) default validator public key
+- Improve `casper/magni_casper/src/bin/magni_livenet.rs`
+  - Print deploy results in a machine-readable way (recommended: a single JSON line at the end)
+    - e.g. `MAGNI_DEPLOY_JSON={...}`
+  - JSON must include at least:
     - `network` / `chain_name`
     - `tcspr_contract_hash`, `mcspr_contract_hash`, `magni_contract_hash`
-    - (가능하면) package hash/contract package hash도 함께
-  - (주의) 프론트에서 호출 가능한 식별자(보통 contract hash)를 우선 제공
-- 올인원 스크립트 추가: `casper/scripts/testnet_deploy_and_wire_frontend.sh`
-  - 입력: `casper/.env` (또는 env vars)
+    - (If possible) include package hash / contract package hash as well
+  - Prefer identifiers usable by the frontend (usually contract hash)
+- Add script: `casper/scripts/testnet_deploy_and_wire_frontend.sh`
+  - Input: `casper/.env` (or env vars)
     - `ODRA_CASPER_LIVENET_SECRET_KEY_PATH`
     - `ODRA_CASPER_LIVENET_NODE_ADDRESS`
     - `ODRA_CASPER_LIVENET_CHAIN_NAME=casper-test`
-    - (선택) `STYKS_PRICE_FEED_PACKAGE_HASH`, `STYKS_PRICE_FEED_ID`
-    - (선택) `DEFAULT_VALIDATOR_PUBLIC_KEY`
-  - 동작:
-    1) `(casper/magni_casper) cargo run --bin magni_livenet --features=livenet` 실행
-    2) stdout에서 JSON을 파싱해 배포 결과 추출
-    3) `casper/frontend/.env.local`(또는 `casper/frontend/.env`)에 아래를 자동 작성/갱신:
+    - (Optional) `STYKS_PRICE_FEED_PACKAGE_HASH`, `STYKS_PRICE_FEED_ID`
+    - (Optional) `DEFAULT_VALIDATOR_PUBLIC_KEY`
+  - Behavior:
+    1) Run `(casper/magni_casper) cargo run --bin magni_livenet --features=livenet`
+    2) Parse deploy JSON from stdout
+    3) Auto-write/update `casper/frontend/.env.local` (or `casper/frontend/.env`) with:
        - `VITE_CASPER_CHAIN_NAME=casper-test`
        - `VITE_CASPER_NODE_URL=<node rpc>`
        - `VITE_TCSPR_CONTRACT_HASH=<tcspr_contract_hash>`
        - `VITE_MCSPR_CONTRACT_HASH=<mcspr_contract_hash>`
        - `VITE_MAGNI_CONTRACT_HASH=<magni_contract_hash>`
-       - `VITE_DEFAULT_VALIDATOR_PUBLIC_KEY=<DEFAULT_VALIDATOR_PUBLIC_KEY>` (가능하면)
-    3.1) `casper/frontend/src/config/contracts.generated.ts`도 자동 생성/갱신(동일 정보 동기화)
-       - export 형태로 `chainName`, `nodeUrl`, `tcsprContractHash`, `mcsprContractHash`, `magniContractHash`, `defaultValidatorPublicKey` 제공
-       - 프론트는 우선순위: `.env`(VITE_*) → `contracts.generated.ts` fallback 으로 읽도록 구성(또는 반대; 한 가지로 고정)
-    4) `casper/CONTRACTS.md`에 append(또는 최신 섹션 갱신)
-    5) 사람이 복붙 없이 바로 `pnpm --dir casper/frontend dev`로 실행 가능해야 함
-    6) (스모크) `pnpm --dir casper/frontend build`가 깨지지 않게 보장
-  - 실패 처리:
-    - 필수 env 없으면 명확한 에러 메시지로 종료
-    - JSON 파싱 실패 시 원인/로그 위치 안내
+       - `VITE_DEFAULT_VALIDATOR_PUBLIC_KEY=<DEFAULT_VALIDATOR_PUBLIC_KEY>` (if available)
+    3.1) Auto-generate/update `casper/frontend/src/config/contracts.generated.ts` (keep in sync)
+       - exports: `chainName`, `nodeUrl`, `tcsprContractHash`, `mcsprContractHash`, `magniContractHash`, `defaultValidatorPublicKey`
+       - frontend priority should be consistent: `.env (VITE_*)` → `contracts.generated.ts` fallback (or the reverse, but pick one)
+    4) Append to `casper/CONTRACTS.md` (or update the latest section)
+    5) After the script, a human should be able to run `pnpm --dir casper/frontend dev` without additional copy/paste
+    6) Ensure `(smoke) pnpm --dir casper/frontend build` does not break
+  - Failure handling:
+    - If required env vars are missing, exit with a clear error message
+    - If JSON parsing fails, explain the cause and where to find logs
 
-DoD
-- (casper/magni_casper) `cargo odra test` 성공
-- (casper/magni_casper) `cargo odra build` 성공
-- `bash casper/scripts/testnet_deploy_and_wire_frontend.sh` 실행 후:
-  - `casper/frontend/.env.local`이 생성/업데이트됨
-  - `casper/CONTRACTS.md`에 주소가 기록됨
-- (스모크) 아래가 성공:
+### DoD
+- `(casper/magni_casper) cargo odra test` succeeds
+- `(casper/magni_casper) cargo odra build` succeeds
+- After `bash casper/scripts/testnet_deploy_and_wire_frontend.sh`:
+  - `casper/frontend/.env.local` is created/updated
+  - `casper/CONTRACTS.md` has the appended addresses
+- Smoke checks succeed:
   - `pnpm --dir casper/frontend install`
   - `pnpm --dir casper/frontend build`
-  - (수동 확인) `pnpm --dir casper/frontend dev` 실행 후 UI에서 contract hash가 로드되고 tx 버튼이 enabled인지 확인
-- 커밋: "casper: add testnet all-in-one deploy+wire script"
+  - (Manual) Run `pnpm --dir casper/frontend dev` and verify the UI loads contract hashes and tx buttons are enabled
+- Commit: "casper: add testnet all-in-one deploy+wire script"
 
 ---
 
-## T11. [Research Spike] “컨트랙트가 직접 CSPR delegate 가능한가?” (Casper 2.0 / Odra 2.4)
-배경
-- 현재 PoC는 `tCSPR(CEP-18)`을 “스테이킹 자산”으로 간주하고 `mCSPR`를 민팅하는 구조라서, **실제 Casper native staking(delegation)** 과는 분리되어 있다.
-- 방향 전환: “LST 토큰 발행” 대신, **컨트랙트에 stake(= CSPR 입금)하면 컨트랙트가 validator에 delegation** 하는 vault 형태를 원함.
-- 그런데 Casper는 역사적으로 “delegate는 계정(main purse) 기반”이라 **WASM 컨트랙트가 직접 delegate/undelegate 할 수 없는 제약**이 있었음(이게 2026-01-10 현재도 유효한지 먼저 확인 필요).
+## T11. [Research Spike] “Can a contract delegate CSPR directly?” (Casper 2.0 / Odra 2.4)
 
-리서치 체크리스트(필수 링크/키워드 포함)
+### Background
+- Current PoC treats `tCSPR (CEP-18)` as the “staking asset” and mints `mCSPR`, which is separate from **native Casper staking (delegation)**.
+- Proposed pivot: instead of “issuing an LST token”, build a vault where depositing stake (= CSPR deposit) causes the contract to delegate to a validator.
+- Historically, Casper delegation was account (main purse) based, so a WASM contract could not delegate/undelegate directly (verify whether this is still true as of 2026-01-10).
+
+### Research checklist (includes required links/keywords)
 - Casper docs (delegation / unbonding / min delegation 500 CSPR / 7 eras):
   - https://docs.casper.network/users/delegating/
-- “컨트랙트가 staking 할 수 없었다”는 논의(구현 막히는 지점 파악용):
+- Discussion about “contracts couldn’t stake” (to understand blockers):
   - https://medium.com/casper-association-r-d/casper-staking-from-smart-contract-2143df7752fc
-- Odra 2.4 문서 상에는 `ContractContext::delegate / undelegate / delegated_amount` API가 존재:
+- Odra 2.4 docs show `ContractContext::delegate / undelegate / delegated_amount` APIs:
   - https://docs.odra.dev/advanced-features/staking
 
-목표
-- **(가장 중요)** “stored contract(WASM) 컨텍스트”에서 native staking 호출이 실제 네트워크(casper-test)에서 가능한지/불가능한지 확정한다.
-- 가능하다면: 구현 방식(필요 args, key/purse 타입, 호출 경로)을 문서화.
-- 불가능하다면: 대안 아키텍처(프론트에서 유저가 직접 delegate, 또는 오프체인 operator+오라클 등)를 확정하고 후속 티켓을 그에 맞게 분기한다.
+### Goal
+- **Most important:** confirm whether native staking calls from a stored contract (WASM context) are possible/impossible on an actual network (`casper-test`).
+- If possible: document the exact implementation path (args required, key/purse types, call path).
+- If impossible: decide an alternative architecture (user delegates in frontend, or off-chain operator + oracle/reporting, etc.) and branch follow-up tickets accordingly.
 
-To Do
-1) 최소 PoC 컨트랙트 추가(기존 Magni와 분리 권장)
-   - `casper/magni_casper/src/staking_poc.rs` (또는 `src/contracts/staking_poc.rs`)
+### To Do
+1) Add a minimal PoC contract (recommended to keep separate from existing Magni)
+   - `casper/magni_casper/src/staking_poc.rs` (or `src/contracts/staking_poc.rs`)
    - entrypoints:
      - `#[odra(payable)] stake(validator_public_key: String)`:
        - `let amount = self.env().attached_value();` (motes, U512)
-       - `self.env().delegate(validator_public_key, amount)` 시도
+       - try `self.env().delegate(validator_public_key, amount)`
      - `#[odra(payable)] request_unstake(validator_public_key: String, amount: U512)`:
-       - `self.env().undelegate(validator_public_key, amount)` 시도
+       - try `self.env().undelegate(validator_public_key, amount)`
      - `delegated_amount(validator_public_key: String) -> U512`:
        - `self.env().delegated_amount(validator_public_key)`
-2) odra-test에서 단위 테스트로 “delegate/undelegate 호출이 컴파일/동작”하는지 확인
-   - 주의: odra-test가 “가능한 것처럼” 시뮬레이션 해줄 수 있어 **livenet 검증이 반드시 필요**.
-3) casper-test(livenet)에서 실제로 stake가 발생하는지 검증
-   - 새로운 bin 추가 권장: `casper/magni_casper/src/bin/staking_poc_livenet.rs`
+2) In odra-test, verify whether delegate/undelegate calls compile/run
+   - Warning: odra-test might simulate this “as if it works”, so **livenet verification is required**.
+3) On casper-test (livenet), verify whether staking actually happens
+   - Recommended: add `casper/magni_casper/src/bin/staking_poc_livenet.rs`
    - flow:
      - deploy staking_poc
-     - (caller가 CSPR 보유한 상태에서) `stake` 호출(attach CSPR)
-     - RPC로 `state_get_auction_info` 확인해서 delegator가 “컨트랙트/패키지/엔티티”로 잡히는지, 혹은 트랜잭션이 revert 하는지 확인
-4) 결과를 문서화
-   - `casper/RESEARCH/delegation-from-contract.md` 생성
-   - “가능/불가능”, 실패 시 에러(가능한 경우 revert msg/enum), 네트워크 버전/odra 버전, 재현 커맨드 포함
+     - (caller has CSPR) call `stake` with attached CSPR
+     - via RPC, check `state_get_auction_info`:
+       - does the delegator show up as the “contract/package/entity”, or does the tx revert?
+4) Document results
+   - Create `casper/RESEARCH/delegation-from-contract.md`
+   - Include: possible/impossible, error details (revert msg/enum if available), network version, odra version, reproduction commands
 
-DoD
-- “Casper testnet에서 stored contract가 직접 delegate 가능/불가능”이 **재현 가능한 형태로 확정**됨.
-- 결과 문서(위 `casper/RESEARCH/...`)에:
-  - 사용한 validator key / amount(motes) / deploy hash 예시
-  - 성공 시 auction info 스냅샷 방법, 실패 시 에러 원인(예: main purse 부재, 시스템 컨트랙트 호출 제한 등)
-  - 후속 구현 방향(아래 T12/T13 중 어떤 트랙으로 갈지) 결정
-- 커밋: "casper: research delegation-from-contract feasibility"
+### DoD
+- “Can a stored contract delegate directly on Casper testnet?” is confirmed in a reproducible way.
+- The result doc includes:
+  - validator key / amount (motes) / deploy hash examples
+  - how to snapshot auction info on success, or root cause on failure (e.g. no main purse, system contract call restrictions, etc.)
+  - a decision on which follow-up track to take (T12/T13)
+- Commit: "casper: research delegation-from-contract feasibility"
 
 ---
 
-## T12. [Main Track] “Vault staking” 아키텍처 확정 + Magni 설계 변경(레버리지 포함)
-전제
-- T11 결과를 기반으로 트랙을 선택한다.
-- 목표는 “LST 토큰 발행”이 아니라 **프로토콜 내부에서 share accounting(비토큰/또는 SBT)** 로 user claim을 관리하는 것.
+## T12. [Main Track] Decide “vault staking” architecture + update Magni design (including leverage)
 
-결정해야 할 핵심(티켓 시작 시 반드시 명시)
-- (A) 컨트랙트가 직접 delegate 가능: 온체인에서 deposit→delegate, withdraw→undelegate를 직접 처리.
-- (B) 컨트랙트가 직접 delegate 불가능: 아래 중 하나를 선택
-  - (B1) 비수탁/유저직접: 프론트에서 유저가 auction 컨트랙트에 직접 delegate/undelegate(deploy)하고, Magni는 “레버리지/부채 토큰”만 관리(담보로서의 stake 락은 온체인에서 강제 못함).
-  - (B2) 수탁/operator: 컨트랙트는 CSPR 입출금/정산만 하고, 실제 delegate/undelegate는 오프체인 operator 계정이 수행(필요 시 oracle/reporting 추가). 신뢰 가정이 생김.
+### Assumptions
+- Choose a track based on T11 results.
+- The goal is not “issuing an LST token”, but managing user claims via **internal share accounting (non-token and/or SBT)**.
 
-목표(공통)
-- “레버리지 스테이킹”을 현재 구조(= `mCSPR` 민팅/버닝)로 계속 지원하되,
-  - 담보/스테이킹 자산 단위를 **native CSPR(motes)** 로 정리(가능하면 tCSPR 의존 제거)
-  - close가 즉시 불가할 수 있는 **unbonding delay(예: 7 eras)** 를 UX/상태머신으로 반영
+### Key decisions (must be written at ticket start)
+- (A) Contract can delegate directly: handle deposit→delegate and withdraw→undelegate fully on-chain.
+- (B) Contract cannot delegate directly: choose one
+  - (B1) Non-custodial / user-driven: frontend has users directly delegate/undelegate via auction contract deploys; Magni manages only “leverage/debt token” (cannot enforce stake lock as collateral on-chain).
+  - (B2) Custodial / operator: contract handles CSPR deposit/withdraw/accounting, but an off-chain operator account performs actual delegate/undelegate (optionally with oracle/reporting). Introduces trust assumptions.
 
-To Do (권장 설계 초안 — Claude가 구현 전에 확정)
-1) 단위/데시멀 정리
-   - Casper staking은 “motes(U512, 1 CSPR = 1e9 motes)” 단위.
-   - 현재 컨트랙트는 18 decimals(U256) 기반이므로, 아래 중 하나로 정리:
-     - (권장) 컨트랙트 내부 금액은 motes(U512)로 통일, 프론트에서 표시만 변환
-     - (대안) 내부는 18 decimals 유지하되, staking 호출 시 motes로 변환(실수 위험 큼)
-2) Magni 포지션 모델 재정의(현재 코드/티켓 간 수학 불일치 해결)
-   - “LTV=80%에서 5x 레버리지”를 일관되게 정의:
-     - deposit(유저 equity) = D
+### Goal (common)
+- Continue supporting “leverage staking” via the current model (= mint/burn `mCSPR`), while:
+  - normalizing the collateral/staking asset unit to **native CSPR (motes)** (ideally removing dependency on tCSPR)
+  - reflecting **unbonding delay (e.g. 7 eras)** in UX/state-machine (close may not be immediate)
+
+### To Do (recommended design draft — must be finalized before implementation)
+1) Units/decimals
+   - Casper staking uses motes (U512, 1 CSPR = 1e9 motes).
+   - Current contracts use 18 decimals (U256). Choose one:
+     - (Recommended) normalize internal amounts to motes (U512), and only convert for frontend display
+     - (Alternative) keep 18 decimals internally but convert to motes on staking calls (high risk of mistakes)
+2) Redefine Magni position model (resolve math mismatch between code/tickets)
+   - Consistently define “LTV=80% implies 5x leverage”:
+     - deposit (user equity) = D
      - target leverage = L (1..=5)
      - total_staked = D * L
      - debt = D * (L - 1)
-     - 이때 `debt / total_staked = (L-1)/L` 이고, L=5면 0.8로 LTV와 정확히 일치
-3) (A 트랙) vault stake 상태머신(예시)
-   - `open_position(leverage)` 는 `#[odra(payable)]`:
+     - then `debt / total_staked = (L-1)/L`; for L=5 this is 0.8, exactly matching LTV
+3) (Track A) example state machine
+   - `open_position(leverage)` is `#[odra(payable)]`:
      - attach D motes
-     - (레버리지>1이면) vault reserve에서 B = D*(L-1) motes를 “대여”로 할당
-     - delegate total_staked = D + B 를 validator로 delegate
-     - mCSPR를 debt만큼 민팅(단위/데시멀 결정에 따라 변환)
+     - (if leverage>1) allocate B = D*(L-1) motes as “borrowed” from a vault reserve
+     - delegate total_staked = D + B to validator
+     - mint `mCSPR` equal to debt (convert units/decimals as decided)
    - `request_close_position()`:
      - undelegate(total_staked)
-     - unbonding 완료 전까지 `close_position()`은 revert 또는 “pending” 상태 반환
+     - until unbonding completes, `close_position()` reverts or returns “pending”
    - `finalize_close_position()`:
-     - (unbond 완료 후) withdraw 가능한 CSPR를 받아:
-       - debt에 해당하는 B는 reserve로 반환
-       - 나머지(원금+보상)는 유저에게 반환(또는 보상 정책 정의)
-     - mCSPR burn
-4) reserve(레버리지 유동성) 설계
-   - 즉시 레버리지를 제공하려면 reserve는 **un-staked liquid CSPR** 여야 함(스테이킹해두면 언본딩 때문에 즉시 대여 불가).
-   - 최소 구현:
-     - `#[odra(payable)] provide_reserve()` / `withdraw_reserve(amount)` (owner-only로 시작 가능)
-     - `reserve_available` 추적
-5) view/API 친화성(프론트/스크립트용)
-   - `get_position(user)` 형태로 한 번에 조회 가능한 struct 제공:
-     - 상태(open / closing_pending / closed)
-     - equity(D), debt(B), total_staked, validator, timestamps(era info는 가능하면)
-     - (A 트랙) delegated_amount / unbonding 상태(가능한 범위)
+     - after unbonding, when CSPR becomes withdrawable:
+       - return debt portion B to reserve
+       - return remainder (principal + rewards) to user (define reward policy)
+     - burn `mCSPR`
+4) Reserve (leverage liquidity)
+   - To provide immediate leverage, reserve must be **un-staked liquid CSPR** (if staked, it cannot be lent immediately due to unbonding).
+   - Minimal implementation:
+     - `#[odra(payable)] provide_reserve()` / `withdraw_reserve(amount)` (can start as owner-only)
+     - track `reserve_available`
+5) View/API friendliness (frontend/scripts)
+   - Provide a single-call `get_position(user)` struct:
+     - state (open / closing_pending / closed)
+     - equity(D), debt(B), total_staked, validator, timestamps (era info if possible)
+     - (Track A) delegated_amount / unbonding status (as far as feasible)
 
-DoD
-- 설계 결정(A/B1/B2)과 근거가 `casper/PROJECT.md` 또는 `casper/RESEARCH/...`에 반영됨.
-- 선택된 트랙 기준으로, “open→(pending)→close” 플로우가 명확한 상태머신과 entrypoints로 정의됨.
-- 커밋: "casper: define vault-staking architecture and update magni design"
+### DoD
+- The chosen track (A/B1/B2) and rationale are reflected in `casper/PROJECT.md` or `casper/RESEARCH/...`.
+- For the chosen track, the “open → (pending) → close” flow is clearly defined as a state machine with entrypoints.
+- Commit: "casper: define vault-staking architecture and update magni design"
 
 ---
 
-## T13. (트랙별 구현) 컨트랙트/프론트 엔드투엔드 플로우 구성
-목표
-- T12에서 확정한 트랙 기준으로 **실제 사용 가능한 UX** 를 만든다.
+## T13. (Per-track implementation) End-to-end contract/frontend flow
 
-트랙 A(온체인 delegate 가능) 구현 To Do(요약)
+### Goal
+- Based on the chosen track in T12, build a **usable UX**.
+
+### Track A (on-chain delegation) — To Do (summary)
 - Contracts
-  - `casper/magni_casper/src/magni.rs`를 “native CSPR payable + vault staking” 구조로 리팩터
-  - 기존 `tCSPR` 기반 collateral 로직 제거 또는 데모 전용으로 격리
-  - unit tests:
-    - open_position(L=1..=5) 동작
-    - request_close → (era 경과 시뮬레이션 가능하면) finalize_close
-    - reserve 부족 시 revert
+  - Refactor `casper/magni_casper/src/magni.rs` into “native CSPR payable + vault staking”
+  - Remove or isolate legacy `tCSPR` collateral logic (demo-only)
+  - Unit tests:
+    - `open_position(L=1..=5)` works
+    - `request_close` → (if era simulation possible) `finalize_close`
+    - revert when reserve is insufficient
 - Frontend
-  - “Delegate stake” CTA 제거(또는 “컨트랙트가 자동 delegate” 안내로 변경)
-  - Open Position 시 attach CSPR 입력(단위: CSPR, 내부는 motes로 변환)
-  - Close는 2-step(요청/완료) UI로 분리
+  - Remove “Delegate stake” CTA (or replace with “contract auto-delegates” guidance)
+  - Open Position: attach CSPR input (CSPR unit in UI; convert to motes internally)
+  - Close: split UI into a 2-step flow (request/finalize)
 
-트랙 B1(유저 직접 delegate) 구현 To Do(요약)
-- Frontend에 “Delegate/Undelegate”를 cspr.live 링크 대신 **직접 트랜잭션 생성**으로 구현
-  - auction 컨트랙트 hash를 env로 주입(`VITE_AUCTION_CONTRACT_HASH`)
+### Track B1 (user delegates directly) — To Do (summary)
+- In the frontend, implement Delegate/Undelegate as **direct transactions**, not just cspr.live links
+  - Inject auction contract hash via env (`VITE_AUCTION_CONTRACT_HASH`)
   - entrypoints:
     - `delegate(delegator, validator, amount)`
     - `undelegate(delegator, validator, amount)`
-  - Casper docs의 unbonding delay/최소금액(500 CSPR) 안내 문구 추가
-- Contracts는 기존 PoC( tCSPR + mCSPR ) 유지하되,
-  - “이 포지션은 실제 stake를 온체인에서 락하지 않는다”는 경고를 문서/프론트에 명시
+  - Add guidance about unbonding delay and min amount (500 CSPR) from Casper docs
+- Keep existing PoC contracts (tCSPR + mCSPR), but explicitly warn in docs/frontend:
+  - “This position does not lock native stake on-chain as collateral.”
 
-트랙 B2(operator) 구현 To Do(요약)
+### Track B2 (operator) — To Do (summary)
 - Contracts
-  - stake deposit/withdraw 요청을 이벤트로 남김
-  - operator address 설정(owner-only) + emergency withdraw rails
-- Off-chain (스크립트/서비스)
-  - 이벤트 감시 → operator 키로 delegate/undelegate 실행
-  - 결과(era/amount/완료)를 contract에 report(필요 시)하거나, 최소는 human-operated로 문서화
+  - Emit events for stake deposit/withdraw requests
+  - Configure operator address (owner-only) + emergency withdraw rails
+- Off-chain (scripts/service)
+  - Watch events → operator delegates/undelegates with its key
+  - Report results back to the contract if needed, or document a human-operated procedure as the minimum
 
-DoD
-- 선택 트랙 기준으로 Testnet에서 end-to-end 데모 가능:
-  - 트랙 A: open(attach CSPR) → delegate 확인 → close(언본딩 반영)
-  - 트랙 B1: dApp에서 delegate tx 실행 → (별도) open/close PoC 실행
-  - 트랙 B2: deposit 이벤트 → operator delegate → withdraw 이벤트 처리
-- 커밋: "casper: implement end-to-end staking flow (selected track)"
-
----
-
-# V2 — CSPR Vault (담보대출) + Staking Delegate (Swap loop은 외부 구현)
-
-배경
-- 현재 `Magni`(staking-based leverage PoC)는 `open_position(leverage)` 중심의 “레버리지 포지션” 모델이다.
-- V2는 이를 **일반적인 담보대출(vault)** 모델로 재설계한다:
-  - 유저는 CSPR을 예치(= 담보)하고, 프로토콜은 예치분을 delegate로 staking 운용.
-  - 유저는 담보가치 기준 **LTV 80%까지 mCSPR(부채 토큰)** 을 발행(= borrow)할 수 있다.
-  - mCSPR 부채에는 **연 2% 이자**가 누적된다.
-  - 유저는 **담보비율을 유지하는 한** 담보(CSPR)를 인출할 수 있고, 담보 추가/부채 상환은 언제든 가능하다.
-- “레버리지의 핵심인 mCSPR → (외부 SwapPool) → CSPR → 재예치 반복”은 **외부에서 구현**하므로 컨트랙트 범위에서 제외한다.
-
-V2 핵심 가정(티켓 시작 시 확정해서 문서에 박아야 함)
-- 가격(Oracle):
-  - 기본은 **1 mCSPR = 1 CSPR (nominal)** 로 가정하고 LTV 계산도 1:1로 한다(오라클 불필요).
-  - 오라클 기반(USD) LTV는 V2 범위에서 제외(추후 티켓으로 분리).
-- 단위/데시멀:
-  - CSPR native transfer/staking는 motes(`U512`, 1 CSPR = 1e9 motes).
-  - mCSPR는 18 decimals(`U256`) 유지.
-  - 따라서 **정확한 변환 규칙**(motes ↔ 18 decimals)을 컨트랙트에 명시적으로 둔다(“그냥 캐스팅” 금지).
-- 출금 UX:
-  - Casper staking은 undelegate 후 unbonding delay가 있으므로, 출금은 기본적으로 **2-step**(`request_withdraw` → `finalize_withdraw`) 상태머신을 갖는다.
-  - 단, 컨트랙트에 liquid CSPR가 남아있는 경우(예: batching/가스/최소 delegation 처리로 인해) 즉시 finalize가 가능할 수 있다.
+### DoD
+- End-to-end testnet demo is possible for the selected track:
+  - Track A: open (attach CSPR) → verify delegation → close (reflect unbonding)
+  - Track B1: run delegate tx in dApp → (separately) run PoC open/close
+  - Track B2: deposit event → operator delegate → withdraw event handling
+- Commit: "casper: implement end-to-end staking flow (selected track)"
 
 ---
 
-## T14. V2 스펙 고정 + 상태/인터페이스 설계서 작성
-목표
-- V2 컨트랙트 인터페이스/상태머신/단위/이자 모델을 **코드 작성 전에** 고정한다(Claude 구현 기준 문서).
+# V2 — CSPR Vault (Collateralized Borrowing) + Staking Delegation (Swap loop implemented externally)
 
-To Do
-- `/casper/PROJECT.md`에 V2 스펙 섹션 추가(또는 새 문서 `casper/RESEARCH/v2-vault-spec.md` 생성):
-  - 용어 정의: collateral/debt/LTV/health factor/unbonding/pending withdraw
-  - 단위 정의:
-    - `motes`(U512) ↔ `wad`(18 decimals, U256) 변환식과 반올림 규칙(항상 유저에게 불리하지 않게)
-  - 이자 모델:
-    - 2% APR을 “초당 단리(simple interest)”로 누적할지, “index 기반 누적(사실상 compounding)”으로 할지 선택
-    - 반드시 on-demand accrual(유저 액션 시) + `last_accrual_timestamp`/`index` 저장 방식 명시
-  - 상태머신:
+## Background
+- Current `Magni` (staking-based leverage PoC) is an “open_position(leverage)” leverage-position model.
+- V2 redesigns it into a **standard collateralized lending vault** model:
+  - Users deposit CSPR (= collateral), and the protocol delegates deposited funds for staking.
+  - Users can mint (= borrow) **mCSPR (debt token)** up to **80% LTV** of collateral value.
+  - mCSPR debt accrues **2% APR interest**.
+  - Users can withdraw collateral (CSPR) as long as the collateral ratio stays safe; users can add collateral / repay any time.
+- The core leverage loop “mCSPR → (external SwapPool) → CSPR → re-deposit” is implemented **externally** and is out of contract scope.
+
+## V2 key assumptions (must be locked and written down at ticket start)
+- Price (oracle):
+  - Assume **1 mCSPR = 1 CSPR (nominal)** and compute LTV 1:1 (no oracle needed).
+  - Oracle-based (USD) LTV is out of V2 scope (split into a future ticket).
+- Units/decimals:
+  - Native CSPR transfer/staking uses motes (U512, 1 CSPR = 1e9 motes).
+  - mCSPR remains 18 decimals (U256).
+  - Therefore, define **explicit conversion rules** (motes ↔ 18 decimals) in the contract (no “just casting”).
+- Withdraw UX:
+  - Casper staking has unbonding delay after undelegation, so withdrawals are a **2-step** state machine by default: `request_withdraw` → `finalize_withdraw`.
+  - If the contract still has liquid CSPR (e.g. due to batching/gas/min delegation policy), finalize can be immediate.
+
+---
+
+## T14. Lock V2 spec + write a state/interface design doc
+
+### Goal
+- Lock the V2 contract interface/state machine/units/interest model **before writing code** (doc should be implementable directly).
+
+### To Do
+- Add a V2 spec section to `/casper/PROJECT.md` (or create `casper/RESEARCH/v2-vault-spec.md`):
+  - Terminology: collateral/debt/LTV/health factor/unbonding/pending withdraw
+  - Units:
+    - conversions between `motes` (U512) ↔ `wad` (18 decimals, U256) and rounding rules (never disadvantage users)
+  - Interest model:
+    - choose between “per-second simple interest” vs “index-based accrual (effectively compounding)”
+    - specify on-demand accrual (on user action) + `last_accrual_timestamp` / `index` storage
+  - State machine:
     - deposit/add_collateral
     - borrow
     - repay
-    - request_withdraw(undelegate)
-    - finalize_withdraw(언본딩 완료 후 transfer)
-  - 불변조건(invariants) 명시:
-    - `debt_with_interest(user) <= collateral_value(user) * 0.8` (모든 상태 전이 후)
-    - 상환 후 debt는 절대 음수가 되지 않음(언더플로 방지)
-    - `mCSPR.total_supply`와 전체 부채(합산)가 일치(또는 명시적 차이가 있으면 이유 기록)
-  - 이벤트/에러 enum 초안
-  - “외부 Swap loop은 범위 밖”을 명시
+    - request_withdraw (undelegate)
+    - finalize_withdraw (transfer after unbonding)
+  - Invariants:
+    - `debt_with_interest(user) <= collateral_value(user) * 0.8` (after every state transition)
+    - debt never goes negative after repay (prevent underflow)
+    - `mCSPR.total_supply` matches total debt (or document explicit differences)
+  - Event/error enum draft
+  - Explicitly state: “external swap loop is out of scope”
 
-DoD
-- 설계서에 **entrypoint 시그니처(함수명/인자/단위)** 가 고정되어 있고, Claude가 그대로 구현할 수 있음.
-- 커밋: "docs(casper): define V2 vault spec and invariants"
+### DoD
+- The design doc locks **entrypoint signatures (name/args/units)** so it can be implemented as-is.
+- Commit: "docs(casper): define V2 vault spec and invariants"
 
 ---
 
-## T15. (V2) Magni 컨트랙트 리디자인: Vault + Borrow/Repay/Withdraw(2-step)
-목표
-- `open_position(leverage)` 중심 PoC를 V2 vault 모델로 교체(또는 신규 모듈로 분리)한다.
+## T15. (V2) Redesign Magni contract: Vault + Borrow/Repay/Withdraw (2-step)
 
-To Do (권장 엔트리포인트 — T14에서 확정)
-- Core (유저)
+### Goal
+- Replace the PoC centered around `open_position(leverage)` with the V2 vault model (or split into a new module).
+
+### To Do (recommended entrypoints — finalize in T14)
+- Core (user)
   - `#[odra(payable)] deposit()`:
-    - `attached_value`를 collateral에 반영
-    - (트랙 A) 가능하면 delegate로 staking(최소 delegation/batching 정책은 T17에서)
+    - reflect `attached_value` as collateral
+    - (Track A) if possible, delegate for staking (min delegation/batching policy in T17)
   - `#[odra(payable)] add_collateral()`:
-    - deposit의 alias(UX 편의)
+    - alias for deposit (UX convenience)
   - `borrow(amount_mcspr_wad: U256)`:
-    - interest accrual 수행
-    - `debt_after <= collateral * LTV_MAX` 체크
-    - mCSPR mint to user
+    - accrue interest
+    - check `debt_after <= collateral * LTV_MAX`
+    - mint mCSPR to user
   - `repay(amount_mcspr_wad: U256)`:
-    - interest accrual 수행
-    - 권장 방식: `mCSPR.transfer_from(user, self, amount)` 후 `mCSPR.burn(self, amount)`
-      - (이유) “유저가 토큰을 외부로 보내면 close가 실패” 같은 UX 폭탄 제거
+    - accrue interest
+    - recommended: `mCSPR.transfer_from(user, self, amount)` then `mCSPR.burn(self, amount)`
+      - reason: avoids UX foot-guns like “close fails if user transferred mCSPR out”
   - `request_withdraw(amount_motes: U512)`:
-    - interest accrual 수행
-    - 출금 후 LTV 체크(담보 감소 후에도 안전해야 함)
-    - 충분한 liquid balance가 없으면 `undelegate`를 트리거하고 pending 상태로 기록
-  - `finalize_withdraw()` 또는 `finalize_withdraw(request_id)`:
-    - 언본딩 완료로 liquid balance가 확보되면 CSPR transfer
-    - pending 상태 정리
+    - accrue interest
+    - LTV check after collateral decreases (must remain safe)
+    - if liquid balance is insufficient, trigger `undelegate` and record pending state
+  - `finalize_withdraw()` or `finalize_withdraw(request_id)`:
+    - once liquid balance is available after unbonding, transfer CSPR
+    - clear pending state
 - Admin (owner)
   - `set_validator_public_key(new_key: String)`
   - `pause()` / `unpause()`
-  - (옵션) `set_ltv_max_bps(8000)` / `set_interest_rate_bps(200)` (초기엔 상수 고정도 OK)
+  - (Optional) `set_ltv_max_bps(8000)` / `set_interest_rate_bps(200)` (constants are OK initially)
 - Views
   - `get_position(user)`:
-    - collateral(가능하면 motes + wad 둘 다 or 한 쪽으로 통일)
+    - collateral (either motes+wad, or pick one consistently)
     - debt_principal + debt_with_interest
     - LTV / health_factor
-    - pending_withdraw 정보
-  - `self_balance()` / `delegated_amount()` 등 디버그용 유지
+    - pending_withdraw info
+  - keep debug views like `self_balance()` / `delegated_amount()` as needed
 
-비고(구현 시 결정)
-- 기존 `Magni`(leverage PoC)를 완전히 교체할지, `MagniLeverage`로 파일/모듈을 분리해서 남길지 선택.
-  - V2 출시가 목표면 PoC 엔트리포인트는 제거/비공개 처리 권장(프론트 혼선 방지).
+### Notes (implementation decision)
+- Decide whether to fully replace the existing leverage PoC or keep it as `MagniLeverage` in a separate module.
+  - If V2 is the goal, prefer removing/hiding PoC entrypoints to avoid frontend confusion.
 
-DoD
-- V2 엔트리포인트가 컴파일/배포 가능하고, “deposit→borrow→repay→withdraw(2-step)” 흐름이 contract 레벨에서 성립.
-- 커밋: "feat(contracts): implement V2 CSPR vault (deposit/borrow/repay/withdraw)"
-
----
-
-## T16. (V2) 이자(2% APR) 누적 로직 구현 + 정밀도/반올림 규칙 확정
-목표
-- mCSPR 부채가 시간에 따라 2% APR로 누적되도록 한다(정확히 “언제/어떻게” 증가하는지 투명).
-
-To Do
-- 선택한 모델에 맞춰 구현:
-  - (A) per-user: `debt_principal`, `last_accrual_ts`를 두고, 액션 시 `debt = debt + debt*rate*dt/year`
-  - (B) global index: `debt_index`, `last_accrual_ts`, per-user `scaled_debt`(RAY) 방식
-- `accrue_interest(user)`를 모든 상태변이 함수 시작 시 호출(또는 modifier 유사 패턴).
-- rounding:
-  - 이자 계산은 overflow/underflow 방지.
-  - rounding 방향을 명시(보수적으로 “프로토콜 유리”로 하되 UX/정합성 설명 포함).
-
-DoD
-- 단위 테스트에서 시간 경과 시 debt 증가가 확인됨(허용 오차 포함).
-- 커밋: "feat(contracts): add 2% APR interest accrual for mCSPR debt"
+### DoD
+- V2 entrypoints can compile/deploy, and the “deposit → borrow → repay → withdraw (2-step)” flow is coherent at the contract level.
+- Commit: "feat(contracts): implement V2 CSPR vault (deposit/borrow/repay/withdraw)"
 
 ---
 
-## T17. (V2) Staking delegate/undelegate 정책(최소 delegation, batching, partial withdraw)
-목표
-- “예치된 CSPR을 delegate해서 staking 굴린다”를 V2 상태머신과 모순 없이 구현한다.
+## T16. (V2) Implement interest accrual (2% APR) + lock precision/rounding rules
 
-To Do
-- Casper 최소 delegation(500 CSPR) 제약을 고려한 정책 선택(문서에 명시):
-  - (권장) pooled delegation + batching:
-    - deposit이 들어오면 내부 `pending_to_delegate_motes`에 쌓고, 500 CSPR 이상이 되면 `delegate` 실행
-  - withdraw 요청이 오면:
-    - 우선 liquid balance로 처리 가능하면 즉시 finalize 허용
-    - 부족하면 `undelegate` 실행 + pending withdraw로 전환
-- `undelegate`는 “총 delegated pool에서 일부”를 빼는 것이므로, user별 pending 금액만 추적하면 됨.
-- 이벤트:
+### Goal
+- Make mCSPR debt accrue at 2% APR over time, with a clear and transparent “when/how” model.
+
+### To Do
+- Implement based on the chosen model:
+  - (A) per-user: track `debt_principal`, `last_accrual_ts`, and on action `debt = debt + debt*rate*dt/year`
+  - (B) global index: track `debt_index`, `last_accrual_ts`, per-user `scaled_debt` (RAY) approach
+- Call `accrue_interest(user)` at the start of all state-changing functions (or an equivalent pattern).
+- Rounding:
+  - prevent overflow/underflow in interest math
+  - document rounding direction (conservatively “protocol-favoring”, but explain UX/accounting implications)
+
+### DoD
+- Unit tests confirm debt increases after time passes (within tolerance).
+- Commit: "feat(contracts): add 2% APR interest accrual for mCSPR debt"
+
+---
+
+## T17. (V2) Staking delegation policy (min delegation, batching, partial withdraw)
+
+### Goal
+- Implement “delegate deposited CSPR for staking” without contradicting the V2 state machine.
+
+### To Do
+- Choose a policy that respects Casper min delegation (500 CSPR) and document it:
+  - (Recommended) pooled delegation + batching:
+    - accumulate deposits in `pending_to_delegate_motes`, and call `delegate` once it reaches >= 500 CSPR
+  - On withdraw requests:
+    - if liquid balance is enough, allow immediate finalize
+    - otherwise call `undelegate` and move to pending-withdraw state
+- Since `undelegate` removes from a pooled delegation, tracking per-user pending amount is sufficient.
+- Events:
   - `DelegationTriggered(amount)`
   - `UndelegationRequested(amount, user)`
 
-DoD
-- “500 CSPR 미만 예치”도 받아서 accounting은 되지만, staking/출금은 정책대로 동작(문서/테스트로 명확).
-- 커밋: "feat(contracts): add delegation batching and withdraw unbonding flow"
+### DoD
+- Deposits < 500 CSPR are accepted for accounting, and staking/withdraw behavior follows the documented policy (clear in docs/tests).
+- Commit: "feat(contracts): add delegation batching and withdraw unbonding flow"
 
 ---
 
-## T18. (V2) 테스트 강화 (OdraVM)
-목표
-- V2의 핵심 불변조건/엣지케이스를 테스트로 고정한다(Claude 구현의 안전망).
+## T18. (V2) Strengthen tests (OdraVM)
 
-To Do (필수 테스트 케이스)
-- 기본 플로우
-  - deposit → borrow(max 80%) 성공
-  - repay(partial/full) 성공
-  - request_withdraw(안전범위) 성공 + finalize_withdraw(언본딩 후) 성공
-- 실패 케이스
-  - borrow가 LTV 초과하면 revert
-  - withdraw가 LTV 초과하면 revert
-  - repay가 allowance/잔고 부족이면 revert
-- 이자
-  - 시간 경과 후 debt 증가
-  - repay가 먼저 이자를 반영한 후 감소(순서 보장)
-- 단위/데시멀
-  - motes↔wad 변환이 일관되고, 캐스팅으로 인한 1e9/1e18 단위 오류가 재발하지 않음
+### Goal
+- Lock V2 invariants/edge cases in tests as a safety net.
 
-DoD
-- `(casper/magni_casper) cargo odra test`에서 V2 테스트들이 안정적으로 통과.
-- 커밋: "test(contracts): add V2 vault invariants and flows"
+### To Do (required test cases)
+- Basic flows
+  - deposit → borrow (max 80%) succeeds
+  - repay (partial/full) succeeds
+  - request_withdraw (safe amount) succeeds + finalize_withdraw (after unbonding) succeeds
+- Failure cases
+  - borrow reverts if it exceeds LTV
+  - withdraw reverts if it exceeds LTV
+  - repay reverts if allowance/balance is insufficient
+- Interest
+  - debt increases after time passes
+  - repay applies accrued interest before reducing debt (order is guaranteed)
+- Units/decimals
+  - motes↔wad conversion is consistent, and the 1e9/1e18 unit bug does not regress
+
+### DoD
+- V2 tests pass reliably in `(casper/magni_casper) cargo odra test`.
+- Commit: "test(contracts): add V2 vault invariants and flows"
 
 ---
 
-## T19. (V2) Livenet 데모/배포 스크립트 업데이트
-목표
-- Casper testnet에서 V2 흐름을 재현 가능한 스크립트/바이너리로 만든다.
+## T19. (V2) Update livenet demo/deploy scripts
 
-To Do
-- `magni_livenet`(또는 신규 `vault_livenet`) 플로우:
+### Goal
+- Provide reproducible scripts/binaries to run the V2 flow on Casper testnet.
+
+### To Do
+- Update `magni_livenet` (or add a new `vault_livenet`) flow:
   - deploy mCSPR + V2 Magni
-  - set_minter(V2 Magni)
-  - deposit(attach CSPR) → borrow → repay → request_withdraw
-  - (언본딩 기다림은 자동화가 어렵다면) “대기 후 finalize”를 별도 모드로 분리
-- `casper/DEPLOY.md`, `casper/CONTRACTS.md` 출력 포맷/주소 주입 갱신
+  - `set_minter(V2 Magni)`
+  - deposit (attach CSPR) → borrow → repay → request_withdraw
+  - if unbonding wait is hard to automate, split “wait then finalize” into a separate mode
+- Update output formats and address injection in `casper/DEPLOY.md` and `casper/CONTRACTS.md`
 
-DoD
-- 최소 1회 이상 testnet에서 end-to-end 로그가 남고, 재현 커맨드가 문서화됨.
-- 커밋: "chore(casper): update livenet demo for V2 vault flow"
+### DoD
+- At least one end-to-end log exists on testnet, and reproduction commands are documented.
+- Commit: "chore(casper): update livenet demo for V2 vault flow"
 
 ---
 
-## T20. (V2) Frontend UX 리워크 (deposit/borrow/repay/withdraw)
-목표
-- 프론트가 더 이상 `open_position(leverage)`/`close_position()` 같은 PoC 엔트리포인트를 호출하지 않도록 정리하고,
-  V2 vault UX를 제공한다.
+## T20. (V2) Frontend UX rework (deposit/borrow/repay/withdraw)
 
-To Do
-- 화면/액션
-  - Deposit(attach CSPR), Borrow(mCSPR), Repay(mCSPR), Withdraw(요청/완료 2-step)
-  - Position 카드: collateral, debt(with interest), LTV, health factor, pending withdraw 상태
-- 토큰 UX
-  - Repay는 `approve` → `repay(amount)` 흐름(allowance 표시 포함)
-- 환경변수/주소
-  - `VITE_*_CONTRACT_HASH` 등 최신 엔트리포인트/컨트랙트 이름 반영
+### Goal
+- Ensure the frontend no longer calls PoC entrypoints like `open_position(leverage)`/`close_position()`, and instead provides a V2 vault UX.
 
-DoD
-- `pnpm --dir casper/frontend build` 성공
-- testnet에서 최소 1회 “deposit/borrow”까지 실제 트랜잭션이 찍힘(Withdraw finalize는 언본딩 상황에 따라 데모 단계에서 분리 가능).
-- 커밋: "feat(frontend): add V2 vault UX (deposit/borrow/repay/withdraw)"
+### To Do
+- Screens/actions
+  - Deposit (attach CSPR), Borrow (mCSPR), Repay (mCSPR), Withdraw (2-step request/finalize)
+  - Position card: collateral, debt (with interest), LTV, health factor, pending withdraw state
+- Token UX
+  - Repay uses `approve` → `repay(amount)` (show allowance)
+- Env vars / addresses
+  - Update `VITE_*_CONTRACT_HASH` etc for latest entrypoints/contract names
+
+### DoD
+- `pnpm --dir casper/frontend build` succeeds
+- On testnet, at least one real tx is executed up to “deposit/borrow” (withdraw finalize can be split depending on unbonding timing).
+- Commit: "feat(frontend): add V2 vault UX (deposit/borrow/repay/withdraw)"

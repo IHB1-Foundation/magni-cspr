@@ -5,11 +5,11 @@ This file tracks deployed contract addresses on Casper Testnet.
 ## How to Deploy
 
 ```bash
-# (권장) casper/.env로 관리
+# (Recommended) manage via casper/.env
 cp casper/.env.example casper/.env
 # edit casper/.env
 
-# (선택) 직접 export 하고 싶다면:
+# (Optional) if you want to export directly:
 # export ODRA_CASPER_LIVENET_SECRET_KEY_PATH=/path/to/secret_key.pem
 # export ODRA_CASPER_LIVENET_NODE_ADDRESS=https://node.testnet.casper.network   # no /rpc (Odra appends /rpc)
 # export ODRA_CASPER_LIVENET_EVENTS_URL=https://node.testnet.casper.network/events
