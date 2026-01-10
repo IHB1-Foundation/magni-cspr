@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/rpc", "destination": "/api/rpc" }
+  ]
+}
+

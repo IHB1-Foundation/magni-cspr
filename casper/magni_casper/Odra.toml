@@ -1,0 +1,14 @@
+[project]
+name = "magni_casper"
+
+[[contracts]]
+name = "TCSPRToken"
+fqn = "magni_casper::tokens::TCSPRToken"
+
+[[contracts]]
+name = "MCSPRToken"
+fqn = "magni_casper::tokens::MCSPRToken"
+
+[[contracts]]
+name = "Magni"
+fqn = "magni_casper::magni::Magni"

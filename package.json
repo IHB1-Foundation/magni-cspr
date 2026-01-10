@@ -1,0 +1,16 @@
+{
+  "name": "magni-casper",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.12.2",
+  "description": "Magni Protocol - Leverage staking on Casper Network",
+  "scripts": {
+    "frontend:dev": "pnpm --dir casper/frontend dev",
+    "frontend:build": "pnpm --dir casper/frontend build",
+    "contracts:test": "cd casper/magni_casper && cargo odra test",
+    "contracts:build": "cd casper/magni_casper && cargo odra build"
+  },
+  "keywords": ["casper", "defi", "leverage", "staking"],
+  "author": "IHB1-Foundation",
+  "license": "ISC"
+}
