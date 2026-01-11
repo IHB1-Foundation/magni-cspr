@@ -5,6 +5,21 @@
 
 use odra::prelude::*;
 use odra::casper_types::U256;
+use alloc::string::String;
+
+/// Extract 64-char hex hash from debug representation of Address
+/// This helps compare addresses that may have different wrapper types in Casper 2.0
+fn extract_hash_hex(debug_str: &str) -> Option<String> {
+    // Look for a 64-char hex sequence in the string
+    let chars: Vec<char> = debug_str.chars().collect();
+    for i in 0..chars.len().saturating_sub(63) {
+        let slice: String = chars[i..i+64].iter().collect();
+        if slice.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Some(slice.to_lowercase());
+        }
+    }
+    None
+}
 
 /// Events for CEP-18 tokens
 pub mod events {
@@ -261,23 +276,32 @@ impl MCSPRToken {
     }
 
     /// Mint tokens (only minter can call)
-    /// Uses package hash comparison to handle Casper 2.0 Entity/Package address mismatch
+    /// Uses flexible comparison to handle Casper 2.0 Entity/Package address differences
     pub fn mint(&mut self, to: Address, amount: U256) {
         let caller = self.env().caller();
         let minter = self.minter.get();
 
-        // Compare by contract package hash only (not full Address)
-        // This handles Casper 2.0 where cross-contract caller may have different Address representation
-        let authorized = match (&minter, caller.as_contract_package_hash()) {
-            (Some(m), Some(caller_pkg)) => {
-                // Both are contracts - compare package hashes
-                m.as_contract_package_hash() == Some(caller_pkg)
+        // Try multiple comparison strategies to handle Casper 2.0 address representations
+        let authorized = match &minter {
+            Some(m) => {
+                // Strategy 1: Direct equality
+                if *m == caller {
+                    true
+                }
+                // Strategy 2: Compare package hashes (for contract-to-contract calls)
+                else if let (Some(m_pkg), Some(caller_pkg)) = (m.as_contract_package_hash(), caller.as_contract_package_hash()) {
+                    m_pkg == caller_pkg
+                }
+                // Strategy 3: Compare underlying bytes (last resort for address format differences)
+                else {
+                    // Extract the underlying hash bytes and compare
+                    let m_bytes = format!("{:?}", m);
+                    let caller_bytes = format!("{:?}", caller);
+                    // Check if the hex representation matches (ignoring wrapper type)
+                    extract_hash_hex(&m_bytes) == extract_hash_hex(&caller_bytes)
+                }
             }
-            (Some(m), None) => {
-                // Caller is account, minter is set - check exact match
-                *m == caller
-            }
-            _ => false,
+            None => false,
         };
 
         if !authorized {
@@ -287,20 +311,30 @@ impl MCSPRToken {
     }
 
     /// Burn tokens (only minter can call, burns from target address)
-    /// Uses package hash comparison to handle Casper 2.0 Entity/Package address mismatch
+    /// Uses flexible comparison to handle Casper 2.0 Entity/Package address differences
     pub fn burn(&mut self, from: Address, amount: U256) {
         let caller = self.env().caller();
         let minter = self.minter.get();
 
-        // Compare by contract package hash only
-        let authorized = match (&minter, caller.as_contract_package_hash()) {
-            (Some(m), Some(caller_pkg)) => {
-                m.as_contract_package_hash() == Some(caller_pkg)
+        // Try multiple comparison strategies to handle Casper 2.0 address representations
+        let authorized = match &minter {
+            Some(m) => {
+                // Strategy 1: Direct equality
+                if *m == caller {
+                    true
+                }
+                // Strategy 2: Compare package hashes (for contract-to-contract calls)
+                else if let (Some(m_pkg), Some(caller_pkg)) = (m.as_contract_package_hash(), caller.as_contract_package_hash()) {
+                    m_pkg == caller_pkg
+                }
+                // Strategy 3: Compare underlying bytes (last resort for address format differences)
+                else {
+                    let m_bytes = format!("{:?}", m);
+                    let caller_bytes = format!("{:?}", caller);
+                    extract_hash_hex(&m_bytes) == extract_hash_hex(&caller_bytes)
+                }
             }
-            (Some(m), None) => {
-                *m == caller
-            }
-            _ => false,
+            None => false,
         };
 
         if !authorized {

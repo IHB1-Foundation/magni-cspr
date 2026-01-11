@@ -151,29 +151,47 @@ fn main() {
     };
 
     // ==========================================
-    // Step 3: Set mCSPR minter to Magni (best-effort, skip in query mode)
+    // Step 3: Set mCSPR minter to Magni (CRITICAL - must succeed for borrow to work)
     // ==========================================
     let mcspr = if should_query {
         println!("[STEP 3] Skipping minter check (query mode)...");
         MCSPRTokenHostRef::new(mcspr_addr, env.clone())
     } else {
-        println!("[STEP 3] Ensuring mCSPR minter is Magni...");
+        println!("[STEP 3] Setting mCSPR minter to Magni...");
         env.set_gas(call_gas);
         let mut mcspr = MCSPRTokenHostRef::new(mcspr_addr, env.clone());
         let current_minter = mcspr.minter();
-        if current_minter == Some(magni_addr) {
+
+        println!("     Current minter: {:?}", current_minter);
+        println!("     Magni address:  {:?}", magni_addr);
+
+        // Check if minter needs to be updated
+        let minter_matches = match &current_minter {
+            Some(m) => {
+                // Direct comparison
+                *m == magni_addr ||
+                // Package hash comparison
+                m.as_contract_package_hash() == magni_addr.as_contract_package_hash() ||
+                // Debug string comparison (extract hash)
+                format!("{:?}", m).contains(&format!("{:?}", magni_addr).chars().filter(|c| c.is_ascii_hexdigit()).collect::<String>())
+            }
+            None => false,
+        };
+
+        if minter_matches {
             println!("[OK] mCSPR minter already set to Magni.");
         } else {
-            // This will only succeed if the caller is the current minter (typically during fresh deploy).
-            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                mcspr.set_minter(magni_addr);
-            }));
-            match res {
-                Ok(_) => println!("[OK] mCSPR minter updated to: {:?}", mcspr.minter()),
-                Err(_) => println!(
-                    "[WARN] Could not update minter (current={:?}). If this is a reused deployment, ensure mCSPR minter is Magni.",
-                    current_minter
-                ),
+            println!("     Calling set_minter...");
+            // This MUST succeed for borrow to work - no catch_unwind, let it fail if unauthorized
+            mcspr.set_minter(magni_addr);
+
+            // Verify the update
+            let new_minter = mcspr.minter();
+            println!("[OK] mCSPR minter updated to: {:?}", new_minter);
+
+            // Double-check
+            if new_minter.is_none() {
+                panic!("[FATAL] set_minter succeeded but minter is None!");
             }
         }
         mcspr
