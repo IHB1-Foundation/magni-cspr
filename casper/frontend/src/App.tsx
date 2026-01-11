@@ -2236,8 +2236,26 @@ function App() {
               <>
                 <p>Contracts configured for {CHAIN_NAME}</p>
                 <ul className="contract-list">
-                  <li>mCSPR: {truncateHash(mcsprPackageHashHex || MCSPR_HASH)}</li>
-                  <li>Magni V2: {truncateHash(magniPackageHashHex || MAGNI_HASH)}</li>
+                  <li>
+                    mCSPR:{' '}
+                    <a
+                      href={`https://testnet.cspr.live/contract-package/${mcsprPackageHashHex}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {truncateHash(mcsprPackageHashHex || MCSPR_HASH)}
+                    </a>
+                  </li>
+                  <li>
+                    Magni V2:{' '}
+                    <a
+                      href={`https://testnet.cspr.live/contract-package/${magniPackageHashHex}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {truncateHash(magniPackageHashHex || MAGNI_HASH)}
+                    </a>
+                  </li>
                 </ul>
               </>
             )}

@@ -304,9 +304,20 @@ body {
 }
 
 .contract-list li {
-  padding: 0.25rem 0;
-  font-family: 'SF Mono', Monaco, monospace;
+  padding: 0.35rem 0;
   font-size: 0.8rem;
+}
+
+.contract-list a {
+  font-family: 'SF Mono', Monaco, monospace;
+  color: var(--info);
+  text-decoration: none;
+  transition: color 0.15s, opacity 0.15s;
+}
+
+.contract-list a:hover {
+  color: #93c5fd;
+  text-decoration: underline;
 }
 
 /* Input group */
