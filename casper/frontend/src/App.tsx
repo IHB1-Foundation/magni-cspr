@@ -1972,10 +1972,10 @@ function App() {
               )}
               <button
                 onClick={handleDeposit}
-                className="btn btn-primary"
+                className="btn btn-primary btn-action"
                 disabled={!isConnected || !contractsConfigured || !proxyCallerWasmBytes || isAnyTxPending || parseCSPR(depositAmount) < MIN_DEPOSIT_MOTES}
               >
-                Deposit {depositAmount} CSPR
+                Deposit {depositAmount || '0'} CSPR
               </button>
               {renderTxStatus(depositTx, 'Deposit')}
             </div>
@@ -2009,10 +2009,10 @@ function App() {
               </div>
               <button
                 onClick={handleBorrow}
-                className="btn btn-primary"
-                disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending}
+                className="btn btn-primary btn-action"
+                disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending || parseCSPR(borrowAmount) === 0n}
               >
-                Borrow
+                Borrow {borrowAmount || '0'} mCSPR
               </button>
               {renderTxStatus(borrowTx, 'Borrow')}
             </div>
@@ -2044,52 +2044,47 @@ function App() {
                   <span className="input-unit">mCSPR</span>
                 </div>
               </div>
-              <div className="step-actions">
-                <div className="step">
-                  <span className="step-label">Step 1: Approve</span>
-                  <button
-                    onClick={handleApprove}
-                    className="btn btn-secondary"
-                    disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending || parseCSPR(repayAmount) === 0n}
-                  >
-                    Approve
-                  </button>
+              <div className="btn-group">
+                <button
+                  onClick={handleApprove}
+                  className="btn btn-secondary"
+                  disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending || parseCSPR(repayAmount) === 0n}
+                >
+                  1. Approve
+                </button>
+                <button
+                  onClick={handleRepay}
+                  className="btn btn-primary"
+                  disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending || parseCSPR(repayAmount) === 0n}
+                >
+                  2. Repay {repayAmount || '0'} mCSPR
+                </button>
+              </div>
+              {(approveTx.status !== 'idle' || repayTx.status !== 'idle') && (
+                <div className="tx-status-row">
                   {renderTxStatus(approveTx, 'Approve')}
-                </div>
-                <div className="step">
-                  <span className="step-label">Step 2: Repay</span>
-                  <button
-                    onClick={handleRepay}
-                    className="btn btn-primary"
-                    disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending || parseCSPR(repayAmount) === 0n}
-                  >
-                    Repay
-                  </button>
                   {renderTxStatus(repayTx, 'Repay')}
                 </div>
-              </div>
-              <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #eee' }}>
-                <p style={{ fontSize: '0.85em', color: '#666', marginBottom: 8 }}>
-                  Or repay all debt (interest calculated on-chain):
-                </p>
-                <div className="step-actions">
-                  <button
-                    onClick={handleApproveAll}
-                    className="btn btn-secondary"
-                    disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending}
-                    title="Approve debt + 1% buffer for interest"
-                  >
-                    Approve All
-                  </button>
-                  <button
-                    onClick={handleRepayAll}
-                    className="btn btn-primary"
-                    disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending}
-                    title="Repay all debt including accrued interest (calculated on-chain)"
-                  >
-                    Repay All
-                  </button>
-                </div>
+              )}
+              <div className="divider" />
+              <p className="hint">Or repay all debt (interest calculated on-chain):</p>
+              <div className="btn-group">
+                <button
+                  onClick={handleApproveAll}
+                  className="btn btn-secondary"
+                  disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending}
+                  title="Approve debt + 1% buffer for interest"
+                >
+                  1. Approve All
+                </button>
+                <button
+                  onClick={handleRepayAll}
+                  className="btn btn-primary"
+                  disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending}
+                  title="Repay all debt including accrued interest (calculated on-chain)"
+                >
+                  2. Repay All
+                </button>
               </div>
             </div>
 
@@ -2110,7 +2105,7 @@ function App() {
                   </div>
                   <button
                     onClick={handleFinalizeWithdraw}
-                    className="btn btn-primary"
+                    className="btn btn-primary btn-action"
                     disabled={!isConnected || isAnyTxPending}
                   >
                     Finalize Withdraw
@@ -2139,13 +2134,13 @@ function App() {
                       <span className="input-unit">CSPR</span>
                     </div>
                   </div>
-                  <div className="step-actions" style={{ marginTop: 12 }}>
+                  <div className="btn-group">
                     <button
                       onClick={handleRequestWithdraw}
                       className="btn btn-primary"
                       disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending || parseCSPR(withdrawAmount) === 0n}
                     >
-                      Withdraw
+                      Withdraw {withdrawAmount || '0'} CSPR
                     </button>
                     <button
                       onClick={handleWithdrawMax}
@@ -2153,7 +2148,7 @@ function App() {
                       disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending || maxWithdrawMotes === 0n}
                       title="Withdraw maximum while keeping LTV valid (calculated on-chain)"
                     >
-                      Withdraw All
+                      Withdraw Max
                     </button>
                   </div>
                   {renderTxStatus(withdrawTx, 'Withdraw')}
