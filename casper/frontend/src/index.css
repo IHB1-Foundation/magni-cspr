@@ -304,20 +304,46 @@ body {
 }
 
 .contract-list li {
-  padding: 0.35rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
   font-size: 0.8rem;
 }
 
-.contract-list a {
-  font-family: 'SF Mono', Monaco, monospace;
-  color: var(--info);
-  text-decoration: none;
-  transition: color 0.15s, opacity 0.15s;
+.contract-list .contract-label {
+  color: var(--text-muted);
+  min-width: 3.5rem;
 }
 
-.contract-list a:hover {
-  color: #93c5fd;
-  text-decoration: underline;
+.contract-list code {
+  font-family: 'SF Mono', Monaco, monospace;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.contract-list .link-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.7rem;
+  transition: all 0.15s;
+}
+
+.contract-list .link-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--info);
+  border-color: var(--info);
 }
 
 /* Input group */
