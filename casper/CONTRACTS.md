@@ -2,12 +2,12 @@
 
 This file tracks deployed contract addresses on Casper Testnet.
 
-## Current Deployment (2026-01-11)
+## Current Deployment (2026-01-11T06:50:15Z)
 
 | Contract | Package Hash |
 |----------|--------------|
-| **Magni** (V2 Vault) | `50ba0aecbec54ade57fe1ae840d6b1d689d606f745a008c1d5b60140786de323` |
-| **mCSPR** (Debt Token) | `f659a6469d8038cb5e856be186ec601f353021eb475828e1f0cebce6d6a3685e` |
+| **Magni** (V2 Vault) | `8bc801422a32e26094354ee9b03f8e126049d25c2771690d4d97c88570f163a4` |
+| **mCSPR** (Debt Token) | `519a1f48176bfde2b4314e702687c7a42570a3c38540cd4b87fb256c1fe19176` |
 | **Validator** | `012b365e09c5d75187b4abc25c4aa28109133bab6a256ef4abe24348073e590d80` |
 
 - **Network**: casper-test
@@ -15,8 +15,8 @@ This file tracks deployed contract addresses on Casper Testnet.
 
 ### Explorer Links
 
-- Magni: https://testnet.cspr.live/contract-package/50ba0aecbec54ade57fe1ae840d6b1d689d606f745a008c1d5b60140786de323
-- mCSPR: https://testnet.cspr.live/contract-package/f659a6469d8038cb5e856be186ec601f353021eb475828e1f0cebce6d6a3685e
+- Magni: https://testnet.cspr.live/contract-package/8bc801422a32e26094354ee9b03f8e126049d25c2771690d4d97c88570f163a4
+- mCSPR: https://testnet.cspr.live/contract-package/519a1f48176bfde2b4314e702687c7a42570a3c38540cd4b87fb256c1fe19176
 
 ---
 
@@ -38,6 +38,15 @@ The deploy script automatically updates:
 ---
 
 ## Deployment History
+
+### 2026-01-11T05:XX:XXZ
+
+| Contract | Package Hash |
+|----------|--------------|
+| Magni | `50ba0aecbec54ade57fe1ae840d6b1d689d606f745a008c1d5b60140786de323` |
+| mCSPR | `f659a6469d8038cb5e856be186ec601f353021eb475828e1f0cebce6d6a3685e` |
+
+Note: Mint authorization issue - set_minter failed silently.
 
 ### 2026-01-11T00:12:27Z
 
