@@ -329,18 +329,30 @@ function parseExecutionSuccess(result: unknown): { decided: boolean; success: bo
     if (v2.error_message) {
       return { decided: true, success: false, errorMessage: String(v2.error_message) }
     }
+    // Version2 with no error_message means success
+    return { decided: true, success: true }
+  }
+
+  // Casper 2.0 may also use "Success" wrapper with Version2 inside
+  if (r.Success) {
+    const successInner = r.Success as Record<string, unknown>
+    if (successInner.Version2) {
+      const v2 = successInner.Version2 as Record<string, unknown>
+      if (v2.error_message) {
+        return { decided: true, success: false, errorMessage: String(v2.error_message) }
+      }
+    }
     return { decided: true, success: true }
   }
 
   // Casper 1.x format
-  if (r.Success !== undefined) {
-    return { decided: true, success: true }
-  }
   if (r.Failure) {
     const failure = r.Failure as Record<string, unknown>
     return { decided: true, success: false, errorMessage: String(failure.error_message || 'Execution failed') }
   }
 
+  // Unknown format - log for debugging but don't report as decided
+  console.log('[parseExecutionSuccess] Unknown format:', JSON.stringify(r))
   return { decided: false, success: false }
 }
 
@@ -385,8 +397,8 @@ async function fetchDeployActivityStatus(deployHash: string): Promise<{ status: 
 // Wait for deploy confirmation using jsonRpc directly (Casper 2.0 compatible)
 async function waitForDeployConfirmation(
   deployHash: string,
-  maxAttempts = 90,
-  intervalMs = 2000
+  maxAttempts = 120,
+  intervalMs = 1000
 ): Promise<{ success: boolean; errorMessage?: string }> {
   console.log(`[waitForDeployConfirmation] Waiting for ${deployHash}`)
 
@@ -847,9 +859,37 @@ async function fetchMcsprBalanceFromContract(
 
     const stateRootHash = await getStateRootHash()
 
-    // Compute Odra dictionary key for balances Mapping (index 4 in MCSPRToken)
+    // Diagnostic: Try to query total_supply (Var<U256> at index 4) to verify entity hash works
+    const totalSupplyKey = computeOdraVarKey(ODRA_FIELD_INDEX_MCSPR.TOTAL_SUPPLY)
+    console.log('[fetchMcsprBalance] Total supply key (for diagnostic):', totalSupplyKey)
+    try {
+      const totalSupplyResult = await queryDictionaryItem(stateRootHash, entityHashHex, 'state', totalSupplyKey)
+      console.log('[fetchMcsprBalance] Total supply result:', JSON.stringify(totalSupplyResult, null, 2))
+    } catch (e) {
+      console.log('[fetchMcsprBalance] Total supply query failed:', e)
+    }
+
+    // Try multiple field indices to find the correct one for balances
+    // MCSPRToken fields: name(1), symbol(2), decimals(3), total_supply(4), balances(5), allowances(6), minter(7)
+    // But if Odra adds __events_length at the beginning, indices shift by 1
+    const indicesToTry = [5, 6, 4, 7] // Try 5 first (expected), then others
+    for (const fieldIdx of indicesToTry) {
+      const testKey = computeOdraMappingKey(fieldIdx, userAccountHashHex)
+      console.log(`[fetchMcsprBalance] Trying field index ${fieldIdx}, key: ${testKey}`)
+      try {
+        const testResult = await queryDictionaryItem(stateRootHash, entityHashHex, 'state', testKey)
+        if (testResult?.stored_value?.CLValue) {
+          console.log(`[fetchMcsprBalance] Found value at index ${fieldIdx}:`, JSON.stringify(testResult, null, 2))
+        }
+      } catch (e) {
+        console.log(`[fetchMcsprBalance] Index ${fieldIdx} query failed:`, e)
+      }
+    }
+
+    // Compute Odra dictionary key for balances Mapping (index 5 in MCSPRToken)
     const balanceKey = computeOdraMappingKey(ODRA_FIELD_INDEX_MCSPR.BALANCES, userAccountHashHex)
     console.log('[fetchMcsprBalance] Balance key (hashed):', balanceKey)
+    console.log('[fetchMcsprBalance] Field index used:', ODRA_FIELD_INDEX_MCSPR.BALANCES)
 
     const result = await queryDictionaryItem(stateRootHash, entityHashHex, 'state', balanceKey)
 
@@ -881,6 +921,8 @@ async function fetchMcsprBalanceFromContract(
         console.log('[fetchMcsprBalance] Found balance from bytes:', value.toString())
         return value
       }
+    } else {
+      console.log('[fetchMcsprBalance] No result or CLValue - raw result:', JSON.stringify(result, null, 2))
     }
 
     console.log('[fetchMcsprBalance] No balance found')
