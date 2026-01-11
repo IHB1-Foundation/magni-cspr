@@ -121,7 +121,6 @@ const VaultStatus = {
 const VAULT_STATE_KEY = 'magni_vault_state'
 const ACTIVITY_STATE_KEY_PREFIX = 'magni_activity_v1'
 const ACTIVITY_MAX_ITEMS = 50
-const MCSPR_BALANCE_CACHE_KEY_PREFIX = 'magni_mcspr_balance_cache_v1'
 
 interface PersistedVaultState {
   collateralMotes: string
@@ -566,64 +565,64 @@ async function getEventAtIndexForEntity(
   }
 }
 
-async function fetchMcsprBalanceFromTokenEvents(
-  tokenEntityHashHex: string,
-  userAccountHashHex: string,
-  cacheKey: string
+// Fetch mCSPR balance by querying the balances dictionary directly
+async function fetchMcsprBalanceFromContract(
+  tokenPackageHashHex: string,
+  userAccountHashHex: string
 ): Promise<bigint> {
-  const stateRootHash = await getStateRootHash()
-  const eventsLength = await getEventsLengthForEntity(tokenEntityHashHex)
-
-  let balance = 0n
-  let startIndex = 0
-
   try {
-    const raw = localStorage.getItem(cacheKey)
-    if (raw) {
-      const parsed = JSON.parse(raw) as { eventsLength?: number; balance?: string }
-      if (typeof parsed.eventsLength === 'number' && typeof parsed.balance === 'string' && parsed.eventsLength >= 0) {
-        if (parsed.eventsLength <= eventsLength) {
-          startIndex = parsed.eventsLength
-          balance = BigInt(parsed.balance)
-        }
-      }
+    // Get entity hash from package hash
+    const entityHashHex = await resolveEntityHashHexFromContractPackageHash(tokenPackageHashHex)
+    console.log('[fetchMcsprBalance] Entity hash:', entityHashHex)
+
+    // In Odra, Mapping keys are serialized as: Address enum tag (1 byte) + hash (32 bytes)
+    // For AccountHash: tag=0 + account_hash
+    // The dictionary key is the base64 of this serialized key
+    const keyBytes = new Uint8Array(33)
+    keyBytes[0] = 0 // Account tag
+    const hashBytes = hexToBytes(userAccountHashHex)
+    keyBytes.set(hashBytes, 1)
+
+    // Convert to base64 for dictionary key (Odra uses base64-encoded keys for Mapping)
+    const keyBase64 = btoa(String.fromCharCode(...keyBytes))
+    console.log('[fetchMcsprBalance] Dictionary key (base64):', keyBase64)
+
+    // Query the balances dictionary
+    const result = await jsonRpc<{
+      stored_value?: { CLValue?: { bytes?: string; parsed?: string } }
+    }>('state_get_dictionary_item', {
+      state_root_hash: await getStateRootHash(),
+      dictionary_identifier: {
+        ContractNamedKey: {
+          key: `hash-${entityHashHex}`,
+          dictionary_name: 'balances',
+          dictionary_item_key: keyBase64,
+        },
+      },
+    })
+
+    console.log('[fetchMcsprBalance] Result:', result)
+
+    // Parse U256 from CLValue
+    const parsed = result.stored_value?.CLValue?.parsed
+    if (parsed !== undefined && parsed !== null) {
+      // parsed could be a string representation of the number
+      return BigInt(parsed)
     }
-  } catch {
-    // ignore cache parse errors
-  }
 
-  const target = userAccountHashHex.toLowerCase()
-
-  for (let i = startIndex; i < eventsLength; i++) {
-    const ev = await getEventAtIndexForEntity(stateRootHash, tokenEntityHashHex, i)
-    if (!ev) continue
-
-    const header = parseCESEventName(ev)
-    if (!header) continue
-    if (header.name !== 'event_Transfer') continue
-
-    let offset = header.offsetAfterName
-    const fromOpt = parseOptionAddress(ev, offset)
-    offset += fromOpt.bytesRead
-    const toOpt = parseOptionAddress(ev, offset)
-    offset += toOpt.bytesRead
-    const amountRes = parseU256(ev, offset)
-
-    if (fromOpt.address?.tag === 0 && fromOpt.address.hashHex.toLowerCase() === target) {
-      balance -= amountRes.value
+    // Try parsing from bytes if parsed is not available
+    const bytesHex = result.stored_value?.CLValue?.bytes
+    if (bytesHex) {
+      const bytes = hexToBytes(bytesHex)
+      const { value } = parseU256(bytes, 0)
+      return value
     }
-    if (toOpt.address?.tag === 0 && toOpt.address.hashHex.toLowerCase() === target) {
-      balance += amountRes.value
-    }
-  }
 
-  try {
-    localStorage.setItem(cacheKey, JSON.stringify({ eventsLength, balance: balance.toString(), timestamp: Date.now() }))
-  } catch {
-    // ignore storage failures
+    return 0n
+  } catch (err) {
+    console.log('[fetchMcsprBalance] Error (may be no balance yet):', err)
+    return 0n
   }
-
-  return balance
 }
 
 // Event types we care about
@@ -932,9 +931,7 @@ function App() {
       const accountHash = computeAccountHash(activeKey)
       if (!accountHash) throw new Error('Failed to compute account hash')
 
-      const tokenEntityHashHex = await resolveEntityHashHexFromContractPackageHash(mcsprPackageHashHex)
-      const cacheKey = `${MCSPR_BALANCE_CACHE_KEY_PREFIX}:${CHAIN_NAME}:${mcsprPackageHashHex}:${tokenEntityHashHex}:${activeKey.toLowerCase()}`
-      const balance = await fetchMcsprBalanceFromTokenEvents(tokenEntityHashHex, accountHash, cacheKey)
+      const balance = await fetchMcsprBalanceFromContract(mcsprPackageHashHex, accountHash)
       setMCSPRBalance(balance)
     } catch (err) {
       setMcsprBalanceError(err instanceof Error ? err.message : 'Failed to fetch mCSPR balance')
@@ -1009,17 +1006,6 @@ function App() {
     }
   }, [activeKey, refreshMCSPRBalance])
 
-  // Manual position sync - for recovering position after deposit when localStorage wasn't available
-  const syncPositionFromDeposit = useCallback((cspr: number) => {
-    const motes = BigInt(cspr) * ONE_CSPR
-    setCollateralMotes(motes)
-    setVaultStatus(VaultStatus.Active)
-    setDebtWad(0n)
-    setLtvBps(0n)
-    setPendingWithdrawMotes(0n)
-    setMCSPRBalance(0n)
-    console.log('[syncPositionFromDeposit] Set collateral to', cspr, 'CSPR')
-  }, [])
 
   // Load vault state on wallet connect - try contract events first, then localStorage
   useEffect(() => {
@@ -1783,9 +1769,6 @@ function App() {
 
             <div className={`card ${vaultStatus !== VaultStatus.None ? 'connected' : ''}`}>
               <h2>Vault Position</h2>
-              <p style={{ fontSize: '0.85em', color: '#888', marginBottom: 12 }}>
-                Note: Position is tracked locally. If you deposited before, click "Sync 500 CSPR" to restore your position.
-              </p>
 
               {vaultStatus !== VaultStatus.None ? (
                 <div className="position-summary">
@@ -1822,14 +1805,6 @@ function App() {
               ) : (
                 <div className="no-position">
                   <p>No vault. Deposit CSPR to create one.</p>
-                  <button
-                    type="button"
-                    className="btn btn-outline btn-small"
-                    onClick={() => syncPositionFromDeposit(500)}
-                    style={{ marginTop: 8 }}
-                  >
-                    Sync 500 CSPR (if already deposited)
-                  </button>
                 </div>
               )}
             </div>
@@ -2315,14 +2290,6 @@ function App() {
               ) : (
                 <div className="no-position">
                   <p>No vault. Deposit CSPR to create one.</p>
-                  <button
-                    type="button"
-                    className="btn btn-outline btn-small"
-                    onClick={() => syncPositionFromDeposit(500)}
-                    style={{ marginTop: 8 }}
-                  >
-                    Sync 500 CSPR (if already deposited)
-                  </button>
                 </div>
               )}
             </div>
