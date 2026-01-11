@@ -26,8 +26,9 @@ const VALIDATOR_KEY = import.meta.env.VITE_DEFAULT_VALIDATOR_PUBLIC_KEY || gener
 
 // Contract event URefs (CES - Casper Event Standard)
 // These are from the deployed Magni V2 contract named keys
-const EVENTS_UREF = 'uref-5fdbe2c7bc6e509c482d0d80c93ebf8a2ec39391bc01b43e464271cae945cbca-007'
-const EVENTS_LENGTH_UREF = 'uref-b54a9d43fbc89856b2afe1b1ac8d7a041eadb7bb1eba6802f8f002a4506b98aa-007'
+// Updated: 2026-01-11 deployment
+const EVENTS_UREF = 'uref-95ce2e2458cdbfbfe2bedd47ac9d3cd9a4f083c84b247b94f193525fac8b956e-007'
+const EVENTS_LENGTH_UREF = 'uref-c5c843543fc164b1685bda0bdcf4ff7674f642502e3406fc2437b5f19e5bea80-007'
 
 const TESTNET_EXPLORER = 'https://testnet.cspr.live'
 const NETWORK_LABEL =
@@ -120,6 +121,7 @@ const VaultStatus = {
 const VAULT_STATE_KEY = 'magni_vault_state'
 const ACTIVITY_STATE_KEY_PREFIX = 'magni_activity_v1'
 const ACTIVITY_MAX_ITEMS = 50
+const MCSPR_BALANCE_CACHE_KEY_PREFIX = 'magni_mcspr_balance_cache_v1'
 
 interface PersistedVaultState {
   collateralMotes: string
@@ -444,6 +446,170 @@ function parseU256(data: Uint8Array, offset: number): { value: bigint; bytesRead
   return parseU512(data, offset) // Same format
 }
 
+function parseOptionAddress(data: Uint8Array, offset: number): {
+  address: { tag: number; hashHex: string } | null
+  bytesRead: number
+} {
+  // Option<T>: 0 => None, 1 => Some(T)
+  const opt = data[offset]
+  if (opt === 0) return { address: null, bytesRead: 1 }
+
+  // Address is serialized as Key: tag (1 byte) + 32 bytes hash (Odra Address only uses Account/Hash)
+  if (offset + 34 > data.length) return { address: null, bytesRead: 1 }
+  const addrTag = data[offset + 1]
+  const hashHex = bytesToHex(data.slice(offset + 2, offset + 34))
+  return { address: { tag: addrTag, hashHex }, bytesRead: 1 + 1 + 32 }
+}
+
+function parseCESEventName(eventBytes: Uint8Array): { name: string; offsetAfterName: number } | null {
+  // CES event format:
+  // - u32 event_name_length (4 bytes LE)
+  // - event_name (utf8 string)
+  // - event data (varies by event type)
+  if (eventBytes.length < 4) return null
+  let offset = 0
+  const nameLength = eventBytes[offset] | (eventBytes[offset + 1] << 8) |
+    (eventBytes[offset + 2] << 16) | (eventBytes[offset + 3] << 24)
+  offset += 4
+  if (nameLength < 0 || offset + nameLength > eventBytes.length) return null
+  const name = new TextDecoder().decode(eventBytes.slice(offset, offset + nameLength))
+  offset += nameLength
+  return { name, offsetAfterName: offset }
+}
+
+function extractEntityHashHexFromStoredValue(storedValue: unknown): string | null {
+  try {
+    const text = JSON.stringify(storedValue)
+    const entityMatch = text.match(/entity-hash-[0-9a-f]{64}/i)
+    if (entityMatch) return extractFirstHex32(entityMatch[0])
+    const contractMatch = text.match(/contract-hash-[0-9a-f]{64}/i)
+    if (contractMatch) return extractFirstHex32(contractMatch[0])
+    return null
+  } catch {
+    return null
+  }
+}
+
+async function resolveEntityHashHexFromContractPackageHash(contractPackageHashHex: string): Promise<string> {
+  try {
+    const result = await jsonRpc<{ stored_value?: unknown }>('query_global_state', {
+      state_identifier: null,
+      key: `hash-${contractPackageHashHex}`,
+      path: [],
+    })
+    const extracted = extractEntityHashHexFromStoredValue(result.stored_value)
+    return extracted || contractPackageHashHex
+  } catch {
+    return contractPackageHashHex
+  }
+}
+
+async function getEventsLengthForEntity(entityHashHex: string): Promise<number> {
+  try {
+    const result = await jsonRpc<{
+      stored_value?: { CLValue?: { parsed?: unknown } }
+    }>('query_global_state', {
+      state_identifier: null,
+      key: `hash-${entityHashHex}`,
+      path: ['events_length'],
+    })
+    const parsed = result.stored_value?.CLValue?.parsed
+    if (typeof parsed === 'number') return parsed
+    if (typeof parsed === 'string') return Number(parsed) || 0
+    return 0
+  } catch {
+    return 0
+  }
+}
+
+async function getEventAtIndexForEntity(
+  stateRootHash: string,
+  entityHashHex: string,
+  index: number
+): Promise<Uint8Array | null> {
+  try {
+    const result = await jsonRpc<{
+      stored_value?: { CLValue?: { bytes?: string } }
+    }>('state_get_dictionary_item', {
+      state_root_hash: stateRootHash,
+      dictionary_identifier: {
+        ContractNamedKey: {
+          key: `hash-${entityHashHex}`,
+          dictionary_name: 'events',
+          dictionary_item_key: index.toString(),
+        },
+      },
+    })
+    const bytesHex = result.stored_value?.CLValue?.bytes
+    if (!bytesHex) return null
+    // Skip the first 4 bytes (length prefix of the List<u8>)
+    const eventBytesHex = bytesHex.slice(8)
+    return hexToBytes(eventBytesHex)
+  } catch {
+    return null
+  }
+}
+
+async function fetchMcsprBalanceFromTokenEvents(
+  tokenEntityHashHex: string,
+  userAccountHashHex: string,
+  cacheKey: string
+): Promise<bigint> {
+  const stateRootHash = await getStateRootHash()
+  const eventsLength = await getEventsLengthForEntity(tokenEntityHashHex)
+
+  let balance = 0n
+  let startIndex = 0
+
+  try {
+    const raw = localStorage.getItem(cacheKey)
+    if (raw) {
+      const parsed = JSON.parse(raw) as { eventsLength?: number; balance?: string }
+      if (typeof parsed.eventsLength === 'number' && typeof parsed.balance === 'string' && parsed.eventsLength >= 0) {
+        if (parsed.eventsLength <= eventsLength) {
+          startIndex = parsed.eventsLength
+          balance = BigInt(parsed.balance)
+        }
+      }
+    }
+  } catch {
+    // ignore cache parse errors
+  }
+
+  const target = userAccountHashHex.toLowerCase()
+
+  for (let i = startIndex; i < eventsLength; i++) {
+    const ev = await getEventAtIndexForEntity(stateRootHash, tokenEntityHashHex, i)
+    if (!ev) continue
+
+    const header = parseCESEventName(ev)
+    if (!header) continue
+    if (header.name !== 'event_Transfer') continue
+
+    let offset = header.offsetAfterName
+    const fromOpt = parseOptionAddress(ev, offset)
+    offset += fromOpt.bytesRead
+    const toOpt = parseOptionAddress(ev, offset)
+    offset += toOpt.bytesRead
+    const amountRes = parseU256(ev, offset)
+
+    if (fromOpt.address?.tag === 0 && fromOpt.address.hashHex.toLowerCase() === target) {
+      balance -= amountRes.value
+    }
+    if (toOpt.address?.tag === 0 && toOpt.address.hashHex.toLowerCase() === target) {
+      balance += amountRes.value
+    }
+  }
+
+  try {
+    localStorage.setItem(cacheKey, JSON.stringify({ eventsLength, balance: balance.toString(), timestamp: Date.now() }))
+  } catch {
+    // ignore storage failures
+  }
+
+  return balance
+}
+
 // Event types we care about
 type ParsedEvent =
   | { type: 'Deposited'; user: string; amountMotes: bigint; newCollateralMotes: bigint }
@@ -694,6 +860,7 @@ function App() {
   const [csprAvailableMotes, setCsprAvailableMotes] = useState<bigint>(0n)
   const [csprHeldMotes, setCsprHeldMotes] = useState<bigint>(0n)
   const [csprBalanceError, setCsprBalanceError] = useState<string | null>(null)
+  const [mcsprBalanceError, setMcsprBalanceError] = useState<string | null>(null)
   const [rpcChainspecName, setRpcChainspecName] = useState<string | null>(null)
   const [proxyCallerWasmBytes, setProxyCallerWasmBytes] = useState<Uint8Array | null>(null)
 
@@ -742,6 +909,22 @@ function App() {
   // Loading state for vault refresh
   const [isLoadingVault, setIsLoadingVault] = useState(false)
 
+  const refreshMCSPRBalance = useCallback(async () => {
+    if (!activeKey || !mcsprPackageHashHex) return
+    try {
+      setMcsprBalanceError(null)
+      const accountHash = computeAccountHash(activeKey)
+      if (!accountHash) throw new Error('Failed to compute account hash')
+
+      const tokenEntityHashHex = await resolveEntityHashHexFromContractPackageHash(mcsprPackageHashHex)
+      const cacheKey = `${MCSPR_BALANCE_CACHE_KEY_PREFIX}:${CHAIN_NAME}:${mcsprPackageHashHex}:${tokenEntityHashHex}:${activeKey.toLowerCase()}`
+      const balance = await fetchMcsprBalanceFromTokenEvents(tokenEntityHashHex, accountHash, cacheKey)
+      setMCSPRBalance(balance)
+    } catch (err) {
+      setMcsprBalanceError(err instanceof Error ? err.message : 'Failed to fetch mCSPR balance')
+    }
+  }, [activeKey, mcsprPackageHashHex])
+
   // Reload vault state from contract events (primary) or localStorage (fallback)
   const reloadVaultState = useCallback(async () => {
     if (!activeKey) return
@@ -772,8 +955,7 @@ function App() {
             : 0n
           setLtvBps(ltv)
 
-          // mCSPR balance would need a separate query - for now keep existing
-          setIsLoadingVault(false)
+          await refreshMCSPRBalance()
           return
         }
       }
@@ -789,6 +971,7 @@ function App() {
         setPendingWithdrawMotes(BigInt(cached.pendingWithdrawMotes))
         setMCSPRBalance(BigInt(cached.mCSPRBalance))
         setVaultStatus(cached.vaultStatus)
+        await refreshMCSPRBalance()
       } else {
         console.log('[reloadVaultState] No cached state found')
       }
@@ -803,11 +986,12 @@ function App() {
         setPendingWithdrawMotes(BigInt(cached.pendingWithdrawMotes))
         setMCSPRBalance(BigInt(cached.mCSPRBalance))
         setVaultStatus(cached.vaultStatus)
+        await refreshMCSPRBalance()
       }
     } finally {
       setIsLoadingVault(false)
     }
-  }, [activeKey])
+  }, [activeKey, refreshMCSPRBalance])
 
   // Manual position sync - for recovering position after deposit when localStorage wasn't available
   const syncPositionFromDeposit = useCallback((cspr: number) => {
@@ -827,7 +1011,8 @@ function App() {
 
     // Try to load from contract events first
     void reloadVaultState()
-  }, [isConnected, activeKey, reloadVaultState])
+    void refreshMCSPRBalance()
+  }, [isConnected, activeKey, reloadVaultState, refreshMCSPRBalance])
 
   // Auto-save vault state whenever it changes
   useEffect(() => {
@@ -1284,6 +1469,8 @@ function App() {
       setCsprTotalMotes(0n)
       setCsprAvailableMotes(0n)
       setCsprHeldMotes(0n)
+      setCsprBalanceError(null)
+      setMcsprBalanceError(null)
       setDepositTx({ status: 'idle' })
       setBorrowTx({ status: 'idle' })
       setApproveTx({ status: 'idle' })
@@ -2026,6 +2213,7 @@ function App() {
                   <span>mCSPR Balance</span>
                   <strong title={mCSPRBalance.toString()}>{formatWad(mCSPRBalance)} mCSPR</strong>
                 </div>
+                {mcsprBalanceError && <p className="error">{mcsprBalanceError}</p>}
                 {csprBalanceError && <p className="error">{csprBalanceError}</p>}
                 <div className="actions">
                   <a
@@ -2075,6 +2263,7 @@ function App() {
                   <strong>{formatWad(mCSPRBalance)} mCSPR</strong>
                 </div>
               </div>
+              {mcsprBalanceError && <p className="error">{mcsprBalanceError}</p>}
 
               {vaultStatus !== VaultStatus.None ? (
                 <div className="position-summary">
