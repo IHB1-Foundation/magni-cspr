@@ -7,6 +7,7 @@ import {
   RuntimeArgs,
 } from 'casper-js-sdk'
 import { Buffer } from 'buffer'
+import { blake2b } from 'blakejs'
 import { generatedConfig } from './config/contracts.generated'
 import proxyCallerWasmUrl from './assets/proxy_caller_with_return.wasm?url'
 
@@ -24,11 +25,7 @@ const MCSPR_HASH = import.meta.env.VITE_MCSPR_CONTRACT_HASH || generatedConfig.m
 const MAGNI_HASH = import.meta.env.VITE_MAGNI_CONTRACT_HASH || generatedConfig.magniContractHash || ''
 const VALIDATOR_KEY = import.meta.env.VITE_DEFAULT_VALIDATOR_PUBLIC_KEY || generatedConfig.defaultValidatorPublicKey || ''
 
-// Contract event URefs (CES - Casper Event Standard)
-// These are from the deployed Magni V2 contract named keys
-// Updated: 2026-01-11 deployment
-const EVENTS_UREF = 'uref-95ce2e2458cdbfbfe2bedd47ac9d3cd9a4f083c84b247b94f193525fac8b956e-007'
-const EVENTS_LENGTH_UREF = 'uref-c5c843543fc164b1685bda0bdcf4ff7674f642502e3406fc2437b5f19e5bea80-007'
+// Contract event URefs are now fetched dynamically from contract named keys
 
 const TESTNET_EXPLORER = 'https://testnet.cspr.live'
 const NETWORK_LABEL =
@@ -117,21 +114,16 @@ const VaultStatus = {
   Withdrawing: 2 as VaultStatusType,
 }
 
-// LocalStorage key for persisting vault state
-const VAULT_STATE_KEY = 'magni_vault_state'
+// Activity tracking (localStorage for activity history only)
 const ACTIVITY_STATE_KEY_PREFIX = 'magni_activity_v1'
 const ACTIVITY_MAX_ITEMS = 50
 
-interface PersistedVaultState {
-  collateralMotes: string
-  debtWad: string
-  ltvBps: string
-  pendingWithdrawMotes: string
-  mCSPRBalance: string
-  vaultStatus: VaultStatusType
-  activeKey: string
-  timestamp: number
-}
+// Log contract hashes on startup for debugging
+console.log('='.repeat(60))
+console.log('[STARTUP] Contract Configuration:')
+console.log('[STARTUP] MAGNI_HASH from config:', MAGNI_HASH)
+console.log('[STARTUP] MCSPR_HASH from config:', MCSPR_HASH)
+console.log('='.repeat(60))
 
 // Format utils
 function formatCSPR(motes: bigint): string {
@@ -185,6 +177,77 @@ function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
+// Compute Odra dictionary key for Var<T> (simple value, no mapping key)
+// The dictionary_item_key is: hex(blake2b(index_u32_be))
+function computeOdraVarKey(fieldIndex: number): string {
+  // Index as 4 bytes big endian
+  const indexBytes = new Uint8Array(4)
+  indexBytes[0] = (fieldIndex >> 24) & 0xff
+  indexBytes[1] = (fieldIndex >> 16) & 0xff
+  indexBytes[2] = (fieldIndex >> 8) & 0xff
+  indexBytes[3] = fieldIndex & 0xff
+
+  // Blake2b hash (32 bytes)
+  const hashedKey = blake2b(indexBytes, undefined, 32)
+
+  return bytesToHex(hashedKey)
+}
+
+// Compute Odra dictionary key for Mapping<Address, V>
+// Odra stores all Mappings in a single "state" dictionary.
+// The dictionary_item_key is: hex(blake2b(index_u32_be + serialized_address))
+// - index: field position in the module struct (0-indexed), as u32 big endian
+// - serialized_address: Odra Address encoding = 1 byte tag (0=Account, 1=Contract) + 32 bytes hash
+function computeOdraMappingKey(fieldIndex: number, accountHashHex: string): string {
+  // Index as 4 bytes big endian
+  const indexBytes = new Uint8Array(4)
+  indexBytes[0] = (fieldIndex >> 24) & 0xff
+  indexBytes[1] = (fieldIndex >> 16) & 0xff
+  indexBytes[2] = (fieldIndex >> 8) & 0xff
+  indexBytes[3] = fieldIndex & 0xff
+
+  // Address serialization: tag (0 for AccountHash) + 32 bytes hash
+  const addressTag = new Uint8Array([0x00]) // AccountHash tag
+  const hashBytes = hexToBytes(accountHashHex)
+
+  // Concatenate: index + tag + hash
+  const keyData = new Uint8Array(4 + 1 + 32)
+  keyData.set(indexBytes, 0)
+  keyData.set(addressTag, 4)
+  keyData.set(hashBytes, 5)
+
+  // Blake2b hash (32 bytes)
+  const hashedKey = blake2b(keyData, undefined, 32)
+
+  return bytesToHex(hashedKey)
+}
+
+// Field indices for Magni contract Mappings (based on struct field order)
+// IMPORTANT: Odra module indices start from 1, not 0! (verified via RPC testing)
+// See: casper/magni_casper/src/magni.rs - Magni struct
+const ODRA_FIELD_INDEX_MAGNI = {
+  MCSPR: 1,            // mcspr: Var<Address>
+  VALIDATOR_KEY: 2,    // validator_public_key: Var<String>
+  COLLATERAL: 3,       // collateral: Mapping<Address, U512>
+  DEBT_PRINCIPAL: 4,   // debt_principal: Mapping<Address, U256>
+  LAST_ACCRUAL_TS: 5,  // last_accrual_ts: Mapping<Address, u64>
+  VAULT_STATUS: 6,     // vault_status: Mapping<Address, VaultStatus>
+  PENDING_WITHDRAW: 7, // pending_withdraw: Mapping<Address, U512>
+} as const
+
+// Field indices for MCSPRToken contract fields
+// IMPORTANT: Odra module indices start from 1, not 0!
+// See: casper/magni_casper/src/tokens.rs - MCSPRToken struct
+const ODRA_FIELD_INDEX_MCSPR = {
+  NAME: 1,             // name: Var<String>
+  SYMBOL: 2,           // symbol: Var<String>
+  DECIMALS: 3,         // decimals: Var<u8>
+  TOTAL_SUPPLY: 4,     // total_supply: Var<U256>
+  BALANCES: 5,         // balances: Mapping<Address, U256>
+  ALLOWANCES: 6,       // allowances: Mapping<(Address, Address), U256>
+  MINTER: 7,           // minter: Var<Address>
+} as const
+
 // Compute account hash from public key (Ed25519 or Secp256k1)
 // Uses casper-js-sdk CLPublicKey.toAccountHash() which computes blake2b256(prefix + 0x00 + raw_public_key)
 function computeAccountHash(publicKeyHex: string): string {
@@ -225,20 +288,83 @@ async function jsonRpc<T>(method: string, params?: unknown): Promise<T> {
   return parsed.result
 }
 
-// Deploy status check result
-interface DeployExecutionResult {
+// Deploy/Transaction status check result (Casper 2.0 compatible)
+interface ExecutionResultV1 {
   Success?: unknown
   Failure?: { error_message?: string }
 }
 
+interface ExecutionResultV2 {
+  Version2?: {
+    error_message?: string | null
+    // success if no error_message
+  }
+}
+
+// Casper 1.x format
 interface DeployInfoResult {
   deploy: unknown
   execution_results?: Array<{
-    result: DeployExecutionResult
+    result: ExecutionResultV1
   }>
 }
 
+// Casper 2.0 format
+interface TransactionInfoResult {
+  transaction?: unknown
+  execution_info?: {
+    execution_result?: ExecutionResultV1 | ExecutionResultV2
+  }
+}
+
+// Parse execution result from either format
+function parseExecutionSuccess(result: unknown): { decided: boolean; success: boolean; errorMessage?: string } {
+  if (!result) return { decided: false, success: false }
+
+  const r = result as Record<string, unknown>
+
+  // Casper 2.0 Version2 format
+  if (r.Version2) {
+    const v2 = r.Version2 as Record<string, unknown>
+    if (v2.error_message) {
+      return { decided: true, success: false, errorMessage: String(v2.error_message) }
+    }
+    return { decided: true, success: true }
+  }
+
+  // Casper 1.x format
+  if (r.Success !== undefined) {
+    return { decided: true, success: true }
+  }
+  if (r.Failure) {
+    const failure = r.Failure as Record<string, unknown>
+    return { decided: true, success: false, errorMessage: String(failure.error_message || 'Execution failed') }
+  }
+
+  return { decided: false, success: false }
+}
+
 async function fetchDeployActivityStatus(deployHash: string): Promise<{ status: ActivityStatus; error?: string }> {
+  // Try Casper 2.0 API first (info_get_transaction)
+  try {
+    const txResult = await jsonRpc<TransactionInfoResult>('info_get_transaction', {
+      transaction_hash: { Deploy: deployHash },
+      finalized_approvals: false,
+    })
+
+    if (txResult.execution_info?.execution_result) {
+      const parsed = parseExecutionSuccess(txResult.execution_info.execution_result)
+      if (parsed.decided) {
+        return parsed.success
+          ? { status: 'success' }
+          : { status: 'error', error: parsed.errorMessage }
+      }
+    }
+  } catch {
+    // Fall through to legacy API
+  }
+
+  // Fallback to Casper 1.x API (info_get_deploy)
   try {
     const result = await jsonRpc<DeployInfoResult>('info_get_deploy', { deploy_hash: deployHash })
 
@@ -256,30 +382,54 @@ async function fetchDeployActivityStatus(deployHash: string): Promise<{ status: 
   }
 }
 
-// Wait for deploy confirmation using jsonRpc directly
+// Wait for deploy confirmation using jsonRpc directly (Casper 2.0 compatible)
 async function waitForDeployConfirmation(
   deployHash: string,
   maxAttempts = 90,
   intervalMs = 2000
 ): Promise<{ success: boolean; errorMessage?: string }> {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    try {
-      const result = await jsonRpc<DeployInfoResult>('info_get_deploy', { deploy_hash: deployHash })
+  console.log(`[waitForDeployConfirmation] Waiting for ${deployHash}`)
 
-      if (result.execution_results && result.execution_results.length > 0) {
-        const execResult = result.execution_results[0].result
-        if (execResult.Success !== undefined) {
-          return { success: true }
-        } else if (execResult.Failure) {
-          return {
-            success: false,
-            errorMessage: execResult.Failure.error_message || 'Execution failed',
-          }
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // Try Casper 2.0 API first (info_get_transaction)
+    try {
+      const txResult = await jsonRpc<TransactionInfoResult>('info_get_transaction', {
+        transaction_hash: { Deploy: deployHash },
+        finalized_approvals: false,
+      })
+
+      console.log(`[waitForDeployConfirmation] attempt ${attempt + 1} (v2):`, JSON.stringify(txResult.execution_info?.execution_result))
+
+      if (txResult.execution_info?.execution_result) {
+        const parsed = parseExecutionSuccess(txResult.execution_info.execution_result)
+        if (parsed.decided) {
+          console.log(`[waitForDeployConfirmation] Result:`, parsed)
+          return { success: parsed.success, errorMessage: parsed.errorMessage }
         }
       }
-    } catch (err) {
-      // Deploy not found yet or RPC error, continue polling
-      console.debug(`[waitForDeployConfirmation] attempt ${attempt + 1}: ${err}`)
+    } catch {
+      // Try legacy API
+      try {
+        const result = await jsonRpc<DeployInfoResult>('info_get_deploy', { deploy_hash: deployHash })
+
+        console.log(`[waitForDeployConfirmation] attempt ${attempt + 1} (v1):`, JSON.stringify(result.execution_results?.[0]?.result))
+
+        if (result.execution_results && result.execution_results.length > 0) {
+          const execResult = result.execution_results[0].result
+          if (execResult.Success !== undefined) {
+            console.log(`[waitForDeployConfirmation] Success (v1)`)
+            return { success: true }
+          } else if (execResult.Failure) {
+            console.log(`[waitForDeployConfirmation] Failure (v1):`, execResult.Failure)
+            return {
+              success: false,
+              errorMessage: execResult.Failure.error_message || 'Execution failed',
+            }
+          }
+        }
+      } catch (err) {
+        console.debug(`[waitForDeployConfirmation] attempt ${attempt + 1}: ${err}`)
+      }
     }
 
     await new Promise(r => setTimeout(r, intervalMs))
@@ -346,30 +496,6 @@ async function fetchCsprBalanceDetails(accountIdentifier: string): Promise<{
   }
 }
 
-// Save vault state to localStorage
-function saveVaultState(state: PersistedVaultState): void {
-  try {
-    localStorage.setItem(VAULT_STATE_KEY, JSON.stringify(state))
-  } catch (err) {
-    console.warn('Failed to save vault state:', err)
-  }
-}
-
-// Load vault state from localStorage
-function loadVaultState(activeKey: string): PersistedVaultState | null {
-  try {
-    const raw = localStorage.getItem(VAULT_STATE_KEY)
-    if (!raw) return null
-    const state = JSON.parse(raw) as PersistedVaultState
-    // Only return if it matches the current active key
-    if (state.activeKey !== activeKey) return null
-    return state
-  } catch (err) {
-    console.warn('Failed to load vault state:', err)
-    return null
-  }
-}
-
 // ============ Contract Event Fetching (CES) ============
 
 interface VaultStateFromEvents {
@@ -385,48 +511,7 @@ async function getStateRootHash(): Promise<string> {
   return result.state_root_hash
 }
 
-// Get events length from contract
-async function getEventsLength(): Promise<number> {
-  try {
-    const result = await jsonRpc<{
-      stored_value: { CLValue: { parsed: number } }
-    }>('query_global_state', {
-      state_identifier: null,
-      key: EVENTS_LENGTH_UREF,
-      path: [],
-    })
-    return result.stored_value.CLValue.parsed
-  } catch (err) {
-    console.error('[getEventsLength] Failed:', err)
-    return 0
-  }
-}
-
-// Get event at index from dictionary
-async function getEventAtIndex(stateRootHash: string, index: number): Promise<Uint8Array | null> {
-  try {
-    const result = await jsonRpc<{
-      stored_value: { CLValue: { bytes: string } }
-    }>('state_get_dictionary_item', {
-      state_root_hash: stateRootHash,
-      dictionary_identifier: {
-        URef: {
-          seed_uref: EVENTS_UREF,
-          dictionary_item_key: index.toString(),
-        },
-      },
-    })
-
-    // The bytes are the raw List<u8> which contains the CES event
-    const bytesHex = result.stored_value.CLValue.bytes
-    // Skip the first 4 bytes (length prefix of the List<u8>)
-    const eventBytesHex = bytesHex.slice(8) // 4 bytes = 8 hex chars
-    return hexToBytes(eventBytesHex)
-  } catch (err) {
-    console.error(`[getEventAtIndex] Failed for index ${index}:`, err)
-    return null
-  }
-}
+// Old hardcoded URef functions removed - now using getEventsLengthForEntity and getEventAtIndexForEntity
 
 // Parse U512 from bytes (Casper serialization: 1 byte length + LE value bytes)
 function parseU512(data: Uint8Array, offset: number): { value: bigint; bytesRead: number } {
@@ -479,10 +564,15 @@ function parseCESEventName(eventBytes: Uint8Array): { name: string; offsetAfterN
 function extractEntityHashHexFromStoredValue(storedValue: unknown): string | null {
   try {
     const text = JSON.stringify(storedValue)
-    const entityMatch = text.match(/entity-hash-[0-9a-f]{64}/i)
+    // Casper 2.0: entity-contract-<hash> or AddressableEntity
+    const entityMatch = text.match(/entity-contract-[0-9a-f]{64}/i)
     if (entityMatch) return extractFirstHex32(entityMatch[0])
-    const contractMatch = text.match(/contract-hash-[0-9a-f]{64}/i)
-    if (contractMatch) return extractFirstHex32(contractMatch[0])
+    // Casper 1.x/2.0: contract-<hash> (NOT contract-hash-)
+    const contractMatch = text.match(/"contract-([0-9a-f]{64})"/i)
+    if (contractMatch) return contractMatch[1].toLowerCase()
+    // Fallback: any 64-char hex after "contract_hash"
+    const hashMatch = text.match(/"contract_hash":\s*"[^"]*?([0-9a-f]{64})"/i)
+    if (hashMatch) return hashMatch[1].toLowerCase()
     return null
   } catch {
     return null
@@ -491,34 +581,167 @@ function extractEntityHashHexFromStoredValue(storedValue: unknown): string | nul
 
 async function resolveEntityHashHexFromContractPackageHash(contractPackageHashHex: string): Promise<string> {
   try {
+    console.log('[resolveEntityHash] Querying for package hash:', contractPackageHashHex)
     const result = await jsonRpc<{ stored_value?: unknown }>('query_global_state', {
       state_identifier: null,
       key: `hash-${contractPackageHashHex}`,
       path: [],
     })
+    console.log('[resolveEntityHash] Result:', JSON.stringify(result, null, 2).slice(0, 500))
     const extracted = extractEntityHashHexFromStoredValue(result.stored_value)
+    console.log('[resolveEntityHash] Extracted entity hash:', extracted)
     return extracted || contractPackageHashHex
-  } catch {
+  } catch (err) {
+    console.error('[resolveEntityHash] Error:', err)
     return contractPackageHashHex
   }
 }
 
+// Query Magni contract state directly (collateral, debt for a user)
+// Odra stores all Mappings in a single "state" dictionary with blake2b-hashed keys.
+// The key is computed as: hex(blake2b(field_index_u32_be + serialized_address))
+async function fetchMagniPositionDirect(
+  magniPackageHashHex: string,
+  userAccountHashHex: string
+): Promise<{ collateralMotes: bigint; debtWad: bigint } | null> {
+  try {
+    const entityHashHex = await resolveEntityHashHexFromContractPackageHash(magniPackageHashHex)
+    console.log('[fetchMagniPosition] Package hash:', magniPackageHashHex)
+    console.log('[fetchMagniPosition] Entity hash:', entityHashHex)
+
+    const stateRootHash = await getStateRootHash()
+    console.log('[fetchMagniPosition] State root:', stateRootHash)
+    console.log('[fetchMagniPosition] User account hash:', userAccountHashHex)
+
+    // Compute Odra dictionary keys for collateral and debt Mappings
+    const collateralKey = computeOdraMappingKey(ODRA_FIELD_INDEX_MAGNI.COLLATERAL, userAccountHashHex)
+    const debtKey = computeOdraMappingKey(ODRA_FIELD_INDEX_MAGNI.DEBT_PRINCIPAL, userAccountHashHex)
+    console.log('[fetchMagniPosition] Collateral key (hashed):', collateralKey)
+    console.log('[fetchMagniPosition] Debt key (hashed):', debtKey)
+
+    let collateralMotes = 0n
+    let debtWad = 0n
+
+    // Query collateral from "state" dictionary (Mapping<Address, U512>)
+    const collResult = await queryDictionaryItem(stateRootHash, entityHashHex, 'state', collateralKey)
+    if (collResult?.stored_value?.CLValue) {
+      console.log('[fetchMagniPosition] Collateral result:', JSON.stringify(collResult, null, 2))
+      const parsed = collResult.stored_value.CLValue.parsed
+      // Odra stores values as Vec<u8> (List U8), so parsed is an array of bytes
+      if (Array.isArray(parsed)) {
+        // Convert array to Uint8Array and parse as U512
+        const bytes = new Uint8Array(parsed)
+        const { value } = parseU512(bytes, 0)
+        collateralMotes = value
+        console.log('[fetchMagniPosition] Parsed collateral from array:', collateralMotes.toString())
+      } else if (parsed !== null && parsed !== undefined) {
+        // Direct numeric value (shouldn't happen with Odra, but fallback)
+        collateralMotes = BigInt(String(parsed))
+      } else {
+        // Parse from raw bytes (includes Vec length prefix)
+        const bytesHex = collResult.stored_value.CLValue.bytes
+        if (bytesHex) {
+          const bytes = hexToBytes(bytesHex)
+          // Skip 4-byte Vec<u8> length prefix
+          const { value } = parseU512(bytes, 4)
+          collateralMotes = value
+        }
+      }
+    } else {
+      console.log('[fetchMagniPosition] No collateral found for user')
+    }
+
+    // Query debt_principal from "state" dictionary (Mapping<Address, U256>)
+    const debtResult = await queryDictionaryItem(stateRootHash, entityHashHex, 'state', debtKey)
+    if (debtResult?.stored_value?.CLValue) {
+      console.log('[fetchMagniPosition] Debt result:', JSON.stringify(debtResult, null, 2))
+      const parsed = debtResult.stored_value.CLValue.parsed
+      // Odra stores values as Vec<u8> (List U8), so parsed is an array of bytes
+      if (Array.isArray(parsed)) {
+        // Convert array to Uint8Array and parse as U256
+        const bytes = new Uint8Array(parsed)
+        const { value } = parseU256(bytes, 0)
+        debtWad = value
+        console.log('[fetchMagniPosition] Parsed debt from array:', debtWad.toString())
+      } else if (parsed !== null && parsed !== undefined) {
+        // Direct numeric value (shouldn't happen with Odra, but fallback)
+        debtWad = BigInt(String(parsed))
+      } else {
+        // Parse from raw bytes (includes Vec length prefix)
+        const bytesHex = debtResult.stored_value.CLValue.bytes
+        if (bytesHex) {
+          const bytes = hexToBytes(bytesHex)
+          // Skip 4-byte Vec<u8> length prefix
+          const { value } = parseU256(bytes, 4)
+          debtWad = value
+        }
+      }
+    } else {
+      console.log('[fetchMagniPosition] No debt found for user')
+    }
+
+    console.log('[fetchMagniPosition] Final:', { collateralMotes: collateralMotes.toString(), debtWad: debtWad.toString() })
+    return { collateralMotes, debtWad }
+  } catch (err) {
+    console.error('[fetchMagniPosition] Error:', err)
+    return null
+  }
+}
+
+// Extract named_keys from stored_value (handles both Casper 1.x Contract and 2.0 AddressableEntity)
+function extractNamedKeys(storedValue: unknown): Array<{ name: string; key: string }> | null {
+  if (!storedValue || typeof storedValue !== 'object') return null
+  const sv = storedValue as Record<string, unknown>
+
+  // Casper 1.x: Contract.named_keys
+  if (sv.Contract && typeof sv.Contract === 'object') {
+    const contract = sv.Contract as Record<string, unknown>
+    if (Array.isArray(contract.named_keys)) return contract.named_keys as Array<{ name: string; key: string }>
+  }
+
+  // Casper 2.0: AddressableEntity.named_keys
+  if (sv.AddressableEntity && typeof sv.AddressableEntity === 'object') {
+    const entity = sv.AddressableEntity as Record<string, unknown>
+    if (Array.isArray(entity.named_keys)) return entity.named_keys as Array<{ name: string; key: string }>
+  }
+
+  // Try finding named_keys at any level by stringifying
+  try {
+    const text = JSON.stringify(storedValue)
+    console.log('[extractNamedKeys] stored_value structure:', text.slice(0, 500))
+  } catch {}
+
+  return null
+}
+
 async function getEventsLengthForEntity(entityHashHex: string): Promise<number> {
   try {
+    console.log('[getEventsLength] Querying entity hash:', entityHashHex)
+
     // First get the contract's named keys to find __events_length URef
-    const contractResult = await jsonRpc<{
-      stored_value?: { Contract?: { named_keys?: Array<{ name: string; key: string }> } }
-    }>('query_global_state', {
+    const contractResult = await jsonRpc<{ stored_value?: unknown }>('query_global_state', {
       state_identifier: null,
       key: `hash-${entityHashHex}`,
       path: [],
     })
 
-    const namedKeys = contractResult.stored_value?.Contract?.named_keys
-    if (!namedKeys) return 0
+    console.log('[getEventsLength] Query result:', JSON.stringify(contractResult, null, 2).slice(0, 800))
+
+    const namedKeys = extractNamedKeys(contractResult.stored_value)
+    if (!namedKeys) {
+      console.log('[getEventsLength] No named_keys found')
+      return 0
+    }
+
+    console.log('[getEventsLength] Named keys:', namedKeys.map(nk => nk.name).join(', '))
 
     const eventsLengthKey = namedKeys.find(nk => nk.name === '__events_length')
-    if (!eventsLengthKey) return 0
+    if (!eventsLengthKey) {
+      console.log('[getEventsLength] No __events_length key found')
+      return 0
+    }
+
+    console.log('[getEventsLength] Events length URef:', eventsLengthKey.key)
 
     // Query the URef directly
     const result = await jsonRpc<{
@@ -529,12 +752,68 @@ async function getEventsLengthForEntity(entityHashHex: string): Promise<number> 
       path: [],
     })
     const parsed = result.stored_value?.CLValue?.parsed
+    console.log('[getEventsLength] Events length parsed:', parsed)
     if (typeof parsed === 'number') return parsed
     if (typeof parsed === 'string') return Number(parsed) || 0
     return 0
-  } catch {
+  } catch (err) {
+    console.error('[getEventsLength] Error:', err)
     return 0
   }
+}
+
+// Helper to query dictionary item with both ContractNamedKey and EntityNamedKey formats
+async function queryDictionaryItem(
+  stateRootHash: string,
+  entityHashHex: string,
+  dictionaryName: string,
+  itemKey: string
+): Promise<{ stored_value?: { CLValue?: { bytes?: string; parsed?: unknown } } } | null> {
+  // Try ContractNamedKey first (Casper 1.x style)
+  try {
+    const result = await jsonRpc<{
+      stored_value?: { CLValue?: { bytes?: string; parsed?: unknown } }
+    }>('state_get_dictionary_item', {
+      state_root_hash: stateRootHash,
+      dictionary_identifier: {
+        ContractNamedKey: {
+          key: `hash-${entityHashHex}`,
+          dictionary_name: dictionaryName,
+          dictionary_item_key: itemKey,
+        },
+      },
+    })
+    if (result.stored_value?.CLValue) {
+      console.log(`[queryDictionary] Success with ContractNamedKey for ${dictionaryName}[${itemKey}]`)
+      return result
+    }
+  } catch (e) {
+    console.log(`[queryDictionary] ContractNamedKey failed for ${dictionaryName}[${itemKey}]:`, e)
+  }
+
+  // Try EntityNamedKey (Casper 2.0 style)
+  try {
+    const result = await jsonRpc<{
+      stored_value?: { CLValue?: { bytes?: string; parsed?: unknown } }
+    }>('state_get_dictionary_item', {
+      state_root_hash: stateRootHash,
+      dictionary_identifier: {
+        EntityNamedKey: {
+          key: `entity-contract-${entityHashHex}`,
+          dictionary_name: dictionaryName,
+          dictionary_item_key: itemKey,
+        },
+      },
+    })
+    if (result.stored_value?.CLValue) {
+      console.log(`[queryDictionary] Success with EntityNamedKey for ${dictionaryName}[${itemKey}]`)
+      return result
+    }
+  } catch (e) {
+    console.log(`[queryDictionary] EntityNamedKey failed for ${dictionaryName}[${itemKey}]:`, e)
+  }
+
+  return null
 }
 
 async function getEventAtIndexForEntity(
@@ -543,19 +822,8 @@ async function getEventAtIndexForEntity(
   index: number
 ): Promise<Uint8Array | null> {
   try {
-    const result = await jsonRpc<{
-      stored_value?: { CLValue?: { bytes?: string } }
-    }>('state_get_dictionary_item', {
-      state_root_hash: stateRootHash,
-      dictionary_identifier: {
-        ContractNamedKey: {
-          key: `hash-${entityHashHex}`,
-          dictionary_name: '__events',  // Odra uses double underscore prefix
-          dictionary_item_key: index.toString(),
-        },
-      },
-    })
-    const bytesHex = result.stored_value?.CLValue?.bytes
+    const result = await queryDictionaryItem(stateRootHash, entityHashHex, '__events', index.toString())
+    const bytesHex = result?.stored_value?.CLValue?.bytes
     if (!bytesHex) return null
     // Skip the first 4 bytes (length prefix of the List<u8>)
     const eventBytesHex = bytesHex.slice(8)
@@ -565,7 +833,8 @@ async function getEventAtIndexForEntity(
   }
 }
 
-// Fetch mCSPR balance by querying the balances dictionary directly
+// Fetch mCSPR balance by querying the state dictionary directly
+// Odra stores all Mappings in a single "state" dictionary with blake2b-hashed keys.
 async function fetchMcsprBalanceFromContract(
   tokenPackageHashHex: string,
   userAccountHashHex: string
@@ -576,65 +845,45 @@ async function fetchMcsprBalanceFromContract(
     console.log('[fetchMcsprBalance] Entity hash:', entityHashHex)
     console.log('[fetchMcsprBalance] User account hash:', userAccountHashHex)
 
-    // In Odra, Mapping<Address, V> keys are serialized as: Address enum tag (1 byte) + hash (32 bytes)
-    // For AccountHash: tag=0 + account_hash (hex encoded)
-    const keyHex = '00' + userAccountHashHex.toLowerCase()
-    console.log('[fetchMcsprBalance] Dictionary key (hex):', keyHex)
-
     const stateRootHash = await getStateRootHash()
 
-    // Try multiple key formats since Odra's exact format may vary
-    const keyFormats = [
-      keyHex,                                          // hex: 00 + account_hash
-      userAccountHashHex.toLowerCase(),                // just account hash
-      `account-hash-${userAccountHashHex.toLowerCase()}`, // account-hash-xxx format
-    ]
+    // Compute Odra dictionary key for balances Mapping (index 4 in MCSPRToken)
+    const balanceKey = computeOdraMappingKey(ODRA_FIELD_INDEX_MCSPR.BALANCES, userAccountHashHex)
+    console.log('[fetchMcsprBalance] Balance key (hashed):', balanceKey)
 
-    for (const key of keyFormats) {
-      try {
-        console.log('[fetchMcsprBalance] Trying key format:', key)
-        const result = await jsonRpc<{
-          stored_value?: { CLValue?: { bytes?: string; parsed?: string | number } }
-        }>('state_get_dictionary_item', {
-          state_root_hash: stateRootHash,
-          dictionary_identifier: {
-            ContractNamedKey: {
-              key: `hash-${entityHashHex}`,
-              dictionary_name: 'balances',
-              dictionary_item_key: key,
-            },
-          },
-        })
+    const result = await queryDictionaryItem(stateRootHash, entityHashHex, 'state', balanceKey)
 
-        console.log('[fetchMcsprBalance] Result for key', key, ':', result)
+    if (result?.stored_value?.CLValue) {
+      console.log('[fetchMcsprBalance] Result:', JSON.stringify(result, null, 2))
 
-        // Parse U256 from CLValue
-        const parsed = result.stored_value?.CLValue?.parsed
-        if (parsed !== undefined && parsed !== null) {
-          const value = BigInt(parsed)
-          if (value > 0n) {
-            console.log('[fetchMcsprBalance] Found balance:', value.toString())
-            return value
-          }
-        }
+      // Parse U256 from CLValue
+      const parsed = result.stored_value.CLValue.parsed
+      // Odra stores values as Vec<u8> (List U8), so parsed is an array of bytes
+      if (Array.isArray(parsed)) {
+        // Convert array to Uint8Array and parse as U256
+        const bytes = new Uint8Array(parsed)
+        const { value } = parseU256(bytes, 0)
+        console.log('[fetchMcsprBalance] Found balance from array:', value.toString())
+        return value
+      } else if (parsed !== undefined && parsed !== null) {
+        // Direct numeric value (shouldn't happen with Odra, but fallback)
+        const value = BigInt(String(parsed))
+        console.log('[fetchMcsprBalance] Found balance:', value.toString())
+        return value
+      }
 
-        // Try parsing from bytes if parsed is not available
-        const bytesHex = result.stored_value?.CLValue?.bytes
-        if (bytesHex) {
-          const bytes = hexToBytes(bytesHex)
-          const { value } = parseU256(bytes, 0)
-          if (value > 0n) {
-            console.log('[fetchMcsprBalance] Found balance from bytes:', value.toString())
-            return value
-          }
-        }
-      } catch (e) {
-        // Key format didn't work, try next
-        console.log('[fetchMcsprBalance] Key format failed:', key, e)
+      // Try parsing from bytes if parsed is not available
+      const bytesHex = result.stored_value.CLValue.bytes
+      if (bytesHex) {
+        const bytes = hexToBytes(bytesHex)
+        // Skip 4-byte Vec<u8> length prefix
+        const { value } = parseU256(bytes, 4)
+        console.log('[fetchMcsprBalance] Found balance from bytes:', value.toString())
+        return value
       }
     }
 
-    console.log('[fetchMcsprBalance] No balance found with any key format')
+    console.log('[fetchMcsprBalance] No balance found')
     return 0n
   } catch (err) {
     console.log('[fetchMcsprBalance] Error:', err)
@@ -772,13 +1021,21 @@ function parseCESEvent(eventBytes: Uint8Array): ParsedEvent {
   return { type: 'Unknown', name: eventName }
 }
 
-// Fetch vault state from contract events
-async function fetchVaultStateFromEvents(userAccountHashHex: string): Promise<VaultStateFromEvents | null> {
+// Fetch vault state from contract events (dynamic - uses contract's named keys)
+async function fetchVaultStateFromEvents(
+  userAccountHashHex: string,
+  magniPackageHashHex: string
+): Promise<VaultStateFromEvents | null> {
   console.log('[fetchVaultStateFromEvents] Fetching for user:', userAccountHashHex)
+  console.log('[fetchVaultStateFromEvents] Magni package hash:', magniPackageHashHex)
 
   try {
-    // Get events length
-    const eventsLength = await getEventsLength()
+    // Get entity hash from package hash
+    const entityHashHex = await resolveEntityHashHexFromContractPackageHash(magniPackageHashHex)
+    console.log('[fetchVaultStateFromEvents] Entity hash:', entityHashHex)
+
+    // Get events length dynamically from contract's named keys
+    const eventsLength = await getEventsLengthForEntity(entityHashHex)
     console.log('[fetchVaultStateFromEvents] Events length:', eventsLength)
 
     if (eventsLength === 0) {
@@ -798,7 +1055,7 @@ async function fetchVaultStateFromEvents(userAccountHashHex: string): Promise<Va
 
     // Fetch and process all events (most recent state wins for deposit/borrow amounts)
     for (let i = 0; i < eventsLength; i++) {
-      const eventBytes = await getEventAtIndex(stateRootHash, i)
+      const eventBytes = await getEventAtIndexForEntity(stateRootHash, entityHashHex, i)
       if (!eventBytes) continue
 
       const event = parseCESEvent(eventBytes)
@@ -907,6 +1164,7 @@ function App() {
   const [pendingWithdrawMotes, setPendingWithdrawMotes] = useState<bigint>(BigInt(0))
   const [mCSPRBalance, setMCSPRBalance] = useState<bigint>(BigInt(0))
 
+
   // Form inputs
   const [depositAmount, setDepositAmount] = useState('500')
   const [borrowAmount, setBorrowAmount] = useState('50')
@@ -955,23 +1213,64 @@ function App() {
     }
   }, [activeKey, mcsprPackageHashHex])
 
-  // Reload vault state from contract events (primary) or localStorage (fallback)
+  // Reload vault state from contract (direct query or events)
+  // NO localStorage - always fetch fresh from chain
   const reloadVaultState = useCallback(async () => {
     if (!activeKey) return
 
     setIsLoadingVault(true)
-    console.log('[reloadVaultState] Starting fetch for:', activeKey)
+    console.log('='.repeat(50))
+    console.log('[reloadVaultState] Starting fetch')
+    console.log('[reloadVaultState] Active key:', activeKey)
+    console.log('[reloadVaultState] Magni package hash:', magniPackageHashHex)
+    console.log('[reloadVaultState] mCSPR package hash:', mcsprPackageHashHex)
 
     try {
       // Compute account hash from public key
       const accountHash = computeAccountHash(activeKey)
       console.log('[reloadVaultState] Account hash:', accountHash)
 
-      if (accountHash) {
-        // Try to fetch from contract events
-        const contractState = await fetchVaultStateFromEvents(accountHash)
+      // Try direct contract state query first (most reliable)
+      if (accountHash && magniPackageHashHex) {
+        console.log('[reloadVaultState] Fetching direct state from contract...')
+        const directState = await fetchMagniPositionDirect(magniPackageHashHex, accountHash)
+        if (directState) {
+          console.log('[reloadVaultState] Direct state result:', {
+            collateralMotes: directState.collateralMotes.toString(),
+            debtWad: directState.debtWad.toString()
+          })
 
-        if (contractState) {
+          // If we got non-zero values from direct query, use them
+          if (directState.collateralMotes > 0n || directState.debtWad > 0n) {
+            setCollateralMotes(directState.collateralMotes)
+            setDebtWad(directState.debtWad)
+
+            // Set vault status based on collateral
+            if (directState.collateralMotes > 0n) {
+              setVaultStatus(VaultStatus.Active)
+            }
+
+            // Calculate LTV
+            const collateralWadValue = csprToWad(directState.collateralMotes)
+            const ltv = collateralWadValue > 0n
+              ? (directState.debtWad * BPS_DIVISOR) / collateralWadValue
+              : 0n
+            setLtvBps(ltv)
+
+            await refreshMCSPRBalance()
+            setIsLoadingVault(false)
+            console.log('[reloadVaultState] SUCCESS - vault state loaded from direct query')
+            return
+          }
+        }
+      }
+
+      // Try to fetch from contract events as fallback
+      if (accountHash && magniPackageHashHex) {
+        console.log('[reloadVaultState] Fetching from contract events...')
+        const contractState = await fetchVaultStateFromEvents(accountHash, magniPackageHashHex)
+
+        if (contractState && (contractState.collateralMotes > 0n || contractState.debtWad > 0n)) {
           console.log('[reloadVaultState] Got state from contract events:', contractState)
           setCollateralMotes(contractState.collateralMotes)
           setDebtWad(contractState.debtWad)
@@ -986,70 +1285,41 @@ function App() {
           setLtvBps(ltv)
 
           await refreshMCSPRBalance()
+          console.log('[reloadVaultState] SUCCESS - vault state loaded from events')
           return
         }
       }
 
-      // Fallback to localStorage
-      console.log('[reloadVaultState] Falling back to localStorage')
-      const cached = loadVaultState(activeKey)
-      if (cached) {
-        console.log('[reloadVaultState] Loaded from localStorage:', cached)
-        setCollateralMotes(BigInt(cached.collateralMotes))
-        setDebtWad(BigInt(cached.debtWad))
-        setLtvBps(BigInt(cached.ltvBps))
-        setPendingWithdrawMotes(BigInt(cached.pendingWithdrawMotes))
-        setMCSPRBalance(BigInt(cached.mCSPRBalance))
-        setVaultStatus(cached.vaultStatus)
-        await refreshMCSPRBalance()
-      } else {
-        console.log('[reloadVaultState] No cached state found')
-      }
+      // No vault found - reset to empty state
+      console.log('[reloadVaultState] No vault found on chain - resetting to empty state')
+      setCollateralMotes(0n)
+      setDebtWad(0n)
+      setLtvBps(0n)
+      setPendingWithdrawMotes(0n)
+      setVaultStatus(VaultStatus.None)
+      await refreshMCSPRBalance()
+
     } catch (err) {
       console.error('[reloadVaultState] Error:', err)
-      // Try localStorage as fallback
-      const cached = loadVaultState(activeKey)
-      if (cached) {
-        setCollateralMotes(BigInt(cached.collateralMotes))
-        setDebtWad(BigInt(cached.debtWad))
-        setLtvBps(BigInt(cached.ltvBps))
-        setPendingWithdrawMotes(BigInt(cached.pendingWithdrawMotes))
-        setMCSPRBalance(BigInt(cached.mCSPRBalance))
-        setVaultStatus(cached.vaultStatus)
-        await refreshMCSPRBalance()
-      }
+      // Reset to empty on error
+      setCollateralMotes(0n)
+      setDebtWad(0n)
+      setLtvBps(0n)
+      setPendingWithdrawMotes(0n)
+      setVaultStatus(VaultStatus.None)
     } finally {
       setIsLoadingVault(false)
     }
-  }, [activeKey, refreshMCSPRBalance])
+  }, [activeKey, refreshMCSPRBalance, mcsprPackageHashHex, magniPackageHashHex])
 
 
-  // Load vault state on wallet connect - try contract events first, then localStorage
+  // Load vault state on wallet connect
   useEffect(() => {
     if (!isConnected || !activeKey) return
 
-    // Try to load from contract events first
     void reloadVaultState()
     void refreshMCSPRBalance()
   }, [isConnected, activeKey, reloadVaultState, refreshMCSPRBalance])
-
-  // Auto-save vault state whenever it changes
-  useEffect(() => {
-    if (!activeKey || collateralMotes === 0n && debtWad === 0n && vaultStatus === VaultStatus.None) {
-      return // Don't save empty state
-    }
-    console.log('[autoSaveVaultState] Saving state:', { collateralMotes: collateralMotes.toString(), debtWad: debtWad.toString(), vaultStatus })
-    saveVaultState({
-      collateralMotes: collateralMotes.toString(),
-      debtWad: debtWad.toString(),
-      ltvBps: ltvBps.toString(),
-      pendingWithdrawMotes: pendingWithdrawMotes.toString(),
-      mCSPRBalance: mCSPRBalance.toString(),
-      vaultStatus,
-      activeKey,
-      timestamp: Date.now(),
-    })
-  }, [activeKey, collateralMotes, debtWad, ltvBps, pendingWithdrawMotes, mCSPRBalance, vaultStatus])
 
   const recordActivityPending = useCallback((label: string, hash: string) => {
     setActivityItems(prev => {
@@ -1358,6 +1628,8 @@ function App() {
       if (confirmResult.success) {
         setTxState({ status: 'success', hash: deployHash })
         if (activityLabel) recordActivityFinal(deployHash, 'success')
+        // Auto-hide success after 3 seconds
+        setTimeout(() => setTxState({ status: 'idle' }), 3000)
         return true
       } else {
         setTxState({ status: 'error', hash: deployHash, error: confirmResult.errorMessage || 'Execution failed' })
@@ -1385,10 +1657,12 @@ function App() {
       return false
     }
 
-    console.log('[buildAndSendPayableDeploy] entryPoint:', entryPoint)
-    console.log('[buildAndSendPayableDeploy] attachedMotes:', attachedMotes.toString())
-    console.log('[buildAndSendPayableDeploy] in CSPR:', Number(attachedMotes) / 1e9)
-    console.log('[buildAndSendPayableDeploy] contractPackageHashHex:', contractPackageHashHex)
+    console.log('='.repeat(60))
+    console.log('[buildAndSendPayableDeploy] BUILDING TRANSACTION')
+    console.log('[buildAndSendPayableDeploy] CONTRACT:', contractPackageHashHex)
+    console.log('[buildAndSendPayableDeploy] ENTRY POINT:', entryPoint)
+    console.log('[buildAndSendPayableDeploy] AMOUNT:', Number(attachedMotes) / 1e9, 'CSPR')
+    console.log('='.repeat(60))
 
     try {
       setTxState({ status: 'signing' })
@@ -1443,6 +1717,8 @@ function App() {
       if (confirmResult.success) {
         setTxState({ status: 'success', hash: deployHash })
         if (activityLabel) recordActivityFinal(deployHash, 'success')
+        // Auto-hide success after 3 seconds
+        setTimeout(() => setTxState({ status: 'idle' }), 3000)
         return true
       } else {
         setTxState({ status: 'error', hash: deployHash, error: confirmResult.errorMessage || 'Execution failed' })
@@ -1744,50 +2020,64 @@ function App() {
           <section className="main-left">
             <div className="card">
               <h2>Portfolio</h2>
-              <p>Your balances and vault position at a glance.</p>
-
-              <div className="balances">
-                <div className="balance-row">
-                  <span>CSPR (Wallet)</span>
-                  <strong>{formatCSPR(csprTotalMotes)} CSPR</strong>
+              {!isConnected ? (
+                <div className="connect-prompt">
+                  <p>Connect your wallet to view your portfolio.</p>
+                  <button type="button" className="btn btn-primary" onClick={connect}>
+                    Connect Wallet
+                  </button>
                 </div>
-                <div className="balance-row">
-                  <span>mCSPR</span>
-                  <strong>{formatWad(mCSPRBalance)} mCSPR</strong>
-                </div>
-              </div>
+              ) : (
+                <>
+                  <p>Your balances and vault position at a glance.</p>
 
-              <div className="actions">
-                <button
-                  type="button"
-                  className="btn btn-primary btn-small"
-                  onClick={() => setActivePage('deposit')}
-                >
-                  Go to Deposit
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-outline btn-small"
-                  onClick={() => void refreshCsprBalance()}
-                  disabled={!isConnected}
-                >
-                  Refresh Balance
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-small"
-                  onClick={() => void reloadVaultState()}
-                  disabled={!isConnected || !contractsConfigured || isLoadingVault}
-                >
-                  {isLoadingVault ? 'Loading...' : 'Refresh Vault'}
-                </button>
-              </div>
+                  <div className="balances">
+                    <div className="balance-row">
+                      <span>CSPR (Wallet)</span>
+                      <strong>{formatCSPR(csprTotalMotes)} CSPR</strong>
+                    </div>
+                    <div className="balance-row">
+                      <span>mCSPR</span>
+                      <strong>{formatWad(mCSPRBalance)} mCSPR</strong>
+                    </div>
+                  </div>
+
+                  <div className="actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-small"
+                      onClick={() => setActivePage('deposit')}
+                    >
+                      Go to Deposit
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-small"
+                      onClick={() => void refreshCsprBalance()}
+                    >
+                      Refresh Balance
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-small"
+                      onClick={() => void reloadVaultState()}
+                      disabled={!contractsConfigured || isLoadingVault}
+                    >
+                      {isLoadingVault ? 'Loading...' : 'Refresh Vault'}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
 
             <div className={`card ${vaultStatus !== VaultStatus.None ? 'connected' : ''}`}>
               <h2>Vault Position</h2>
 
-              {vaultStatus !== VaultStatus.None ? (
+              {!isConnected ? (
+                <div className="connect-prompt">
+                  <p>Connect your wallet to view your vault.</p>
+                </div>
+              ) : vaultStatus !== VaultStatus.None ? (
                 <div className="position-summary">
                   <h3>Your Vault</h3>
                   <div className="position-grid">
@@ -1813,9 +2103,15 @@ function App() {
                   </div>
 
                   {vaultStatus === VaultStatus.Withdrawing && (
-                    <div className="position-item" style={{ marginTop: 12 }}>
-                      <span className="label">Pending Withdraw</span>
-                      <span className="value">{formatCSPR(pendingWithdrawMotes)} CSPR</span>
+                    <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'rgba(255, 193, 7, 0.15)', border: '1px solid rgba(255, 193, 7, 0.3)', borderRadius: '8px' }}>
+                      <strong>⏳ Withdrawal Pending</strong>
+                      <div style={{ marginTop: '0.5rem' }}>
+                        <span className="label">Amount: </span>
+                        <strong>{formatCSPR(pendingWithdrawMotes)} CSPR</strong>
+                      </div>
+                      <div style={{ marginTop: '0.5rem', fontSize: '0.85em', opacity: 0.8 }}>
+                        Go to Deposit tab → Withdraw section to finalize after unbonding.
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1872,60 +2168,70 @@ function App() {
           <section className="main-left">
             <div className={`card ${vaultStatus !== VaultStatus.None ? 'connected' : ''}`}>
               <h2>Overview</h2>
-              <p>Balances and vault status.</p>
+              {!isConnected ? (
+                <div className="connect-prompt">
+                  <p>Connect your wallet to view balances and vault status.</p>
+                  <button type="button" className="btn btn-primary" onClick={connect}>
+                    Connect Wallet
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <p>Balances and vault status.</p>
 
-              <div className="balances">
-                <div className="balance-row">
-                  <span>CSPR (Total)</span>
-                  <strong>{formatCSPR(csprTotalMotes)} CSPR</strong>
-                </div>
-                <div className="balance-row">
-                  <span>CSPR (Available)</span>
-                  <strong>{formatCSPR(csprAvailableMotes)} CSPR</strong>
-                </div>
-                <div className="balance-row">
-                  <span>CSPR (Held)</span>
-                  <strong>{formatCSPR(csprHeldMotes)} CSPR</strong>
-                </div>
-                <div className="balance-row">
-                  <span>Collateral</span>
-                  <strong>{formatCSPR(collateralMotes)} CSPR</strong>
-                </div>
-                <div className="balance-row">
-                  <span>Debt</span>
-                  <strong>{formatWad(debtWad)} mCSPR</strong>
-                </div>
-                <div className="balance-row">
-                  <span>LTV</span>
-                  <strong>{Number(ltvBps) / 100}%</strong>
-                </div>
-              </div>
+                  <div className="balances">
+                    <div className="balance-row">
+                      <span>CSPR (Total)</span>
+                      <strong>{formatCSPR(csprTotalMotes)} CSPR</strong>
+                    </div>
+                    <div className="balance-row">
+                      <span>CSPR (Available)</span>
+                      <strong>{formatCSPR(csprAvailableMotes)} CSPR</strong>
+                    </div>
+                    <div className="balance-row">
+                      <span>CSPR (Held)</span>
+                      <strong>{formatCSPR(csprHeldMotes)} CSPR</strong>
+                    </div>
+                    <div className="balance-row">
+                      <span>Collateral</span>
+                      <strong>{formatCSPR(collateralMotes)} CSPR</strong>
+                    </div>
+                    <div className="balance-row">
+                      <span>Debt</span>
+                      <strong>{formatWad(debtWad)} mCSPR</strong>
+                    </div>
+                    <div className="balance-row">
+                      <span>LTV</span>
+                      <strong>{Number(ltvBps) / 100}%</strong>
+                    </div>
+                  </div>
 
-              <div className="actions">
-                <button
-                  type="button"
-                  className="btn btn-outline btn-small"
-                  onClick={() => void refreshCsprBalance()}
-                  disabled={!isConnected}
-                >
-                  Refresh Balance
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-outline btn-small"
-                  onClick={() => void reloadVaultState()}
-                  disabled={!isConnected || !contractsConfigured || isLoadingVault}
-                >
-                  {isLoadingVault ? 'Loading...' : 'Refresh Vault'}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-small"
-                  onClick={() => setActivePage('portfolio')}
-                >
-                  View Portfolio
-                </button>
-              </div>
+                  <div className="actions">
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-small"
+                      onClick={() => void refreshCsprBalance()}
+                    >
+                      Refresh Balance
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-small"
+                      onClick={() => void reloadVaultState()}
+                      disabled={!contractsConfigured || isLoadingVault}
+                    >
+                      {isLoadingVault ? 'Loading...' : 'Refresh Vault'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-small"
+                      onClick={() => setActivePage('portfolio')}
+                    >
+                      View Portfolio
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="card">
@@ -2082,7 +2388,13 @@ function App() {
 
             <div className="card">
               <h2>Withdraw</h2>
-              <p>Withdraw collateral (2-step: request, then finalize after unbonding).</p>
+              <div className="info-box" style={{ marginBottom: '1rem', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', fontSize: '0.85em' }}>
+                <strong>2-Step Withdrawal Process:</strong>
+                <ol style={{ margin: '0.5rem 0 0 1.25rem', padding: 0 }}>
+                  <li><strong>Request</strong> - Initiate withdrawal (starts unbonding)</li>
+                  <li><strong>Finalize</strong> - Complete after unbonding period (~14h testnet / ~14 days mainnet)</li>
+                </ol>
+              </div>
               <div className="info-row">
                 <span>Max safe withdraw:</span>
                 <strong>{formatCSPR(maxWithdrawMotes)} CSPR</strong>
@@ -2090,10 +2402,14 @@ function App() {
 
               {vaultStatus === VaultStatus.Withdrawing ? (
                 <>
-                  <div className="warning-box">
-                    Withdrawal pending: {formatCSPR(pendingWithdrawMotes)} CSPR
-                    <br />
-                    Wait for unbonding (~14h on testnet), then finalize.
+                  <div className="warning-box" style={{ background: 'rgba(255, 193, 7, 0.15)', border: '1px solid rgba(255, 193, 7, 0.3)', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem' }}>
+                    <strong>⏳ Withdrawal Pending</strong>
+                    <div style={{ marginTop: '0.5rem' }}>
+                      Amount: <strong>{formatCSPR(pendingWithdrawMotes)} CSPR</strong>
+                    </div>
+                    <div style={{ marginTop: '0.25rem', fontSize: '0.9em', opacity: 0.8 }}>
+                      Wait for unbonding period to complete, then click "Finalize Withdraw".
+                    </div>
                   </div>
                   <button
                     onClick={handleFinalizeWithdraw}
@@ -2280,6 +2596,7 @@ function App() {
                     </a>
                   </li>
                 </ul>
+
               </>
             )}
           </div>
@@ -2288,50 +2605,57 @@ function App() {
             <div className={`card ${vaultStatus !== VaultStatus.None ? 'connected' : ''}`}>
               <h2>Vault</h2>
 
-              <div className="balances">
-                <div className="balance-row">
-                  <span>mCSPR Balance</span>
-                  <strong>{formatWad(mCSPRBalance)} mCSPR</strong>
-                </div>
-              </div>
-              {mcsprBalanceError && <p className="error">{mcsprBalanceError}</p>}
-
-              {vaultStatus !== VaultStatus.None ? (
-                <div className="position-summary">
-                  <h3>Your Vault</h3>
-                  <div className="position-grid">
-                    <div className="position-item">
-                      <span className="label">Collateral</span>
-                      <span className="value">{formatCSPR(collateralMotes)} CSPR</span>
-                    </div>
-                    <div className="position-item">
-                      <span className="label">Debt</span>
-                      <span className="value">{formatWad(debtWad)} mCSPR</span>
-                    </div>
-                    <div className="position-item">
-                      <span className="label">LTV</span>
-                      <span className="value">{Number(ltvBps) / 100}%</span>
-                    </div>
-                    <div className="position-item">
-                      <span className="label">Status</span>
-                      <span className="value">
-                        {vaultStatus === VaultStatus.Active ? 'Active' :
-                        vaultStatus === VaultStatus.Withdrawing ? 'Withdrawing' : 'None'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {vaultStatus === VaultStatus.Withdrawing && (
-                    <div className="position-item">
-                      <span className="label">Pending Withdraw</span>
-                      <span className="value">{formatCSPR(pendingWithdrawMotes)} CSPR</span>
-                    </div>
-                  )}
+              {!isConnected ? (
+                <div className="connect-prompt">
+                  <p style={{ color: '#888', fontSize: '0.9em' }}>Connect wallet to view vault</p>
                 </div>
               ) : (
-                <div className="no-position">
-                  <p>No vault. Deposit CSPR to create one.</p>
-                </div>
+                <>
+                  <div className="balances">
+                    <div className="balance-row">
+                      <span>mCSPR Balance</span>
+                      <strong>{formatWad(mCSPRBalance)} mCSPR</strong>
+                    </div>
+                  </div>
+                  {mcsprBalanceError && <p className="error">{mcsprBalanceError}</p>}
+
+                  {vaultStatus !== VaultStatus.None ? (
+                    <div className="position-summary">
+                      <h3>Your Vault</h3>
+                      <div className="position-grid">
+                        <div className="position-item">
+                          <span className="label">Collateral</span>
+                          <span className="value">{formatCSPR(collateralMotes)} CSPR</span>
+                        </div>
+                        <div className="position-item">
+                          <span className="label">Debt</span>
+                          <span className="value">{formatWad(debtWad)} mCSPR</span>
+                        </div>
+                        <div className="position-item">
+                          <span className="label">LTV</span>
+                          <span className="value">{Number(ltvBps) / 100}%</span>
+                        </div>
+                        <div className="position-item">
+                          <span className="label">Status</span>
+                          <span className="value">
+                            {vaultStatus === VaultStatus.Active ? 'Active' :
+                            vaultStatus === VaultStatus.Withdrawing ? 'Withdrawing' : 'None'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {vaultStatus === VaultStatus.Withdrawing && (
+                        <div style={{ marginTop: '0.75rem', padding: '0.5rem', background: 'rgba(255, 193, 7, 0.15)', border: '1px solid rgba(255, 193, 7, 0.3)', borderRadius: '6px', fontSize: '0.85em' }}>
+                          <strong>⏳ Pending: {formatCSPR(pendingWithdrawMotes)} CSPR</strong>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="no-position">
+                      <p>No vault. Deposit CSPR to create one.</p>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "blakejs": "^1.2.1",
     "buffer": "^6.0.3",
     "casper-js-sdk": "^2.15.4",
     "react": "^18.2.0",
