@@ -509,6 +509,144 @@ impl Magni {
         });
     }
 
+    /// Repay all debt including accrued interest.
+    /// Calculates exact debt at execution time to handle real-time interest.
+    pub fn repay_all(&mut self) {
+        self.require_not_paused();
+        let caller = self.env().caller();
+
+        // Check vault exists
+        let status = self.vault_status.get(&caller).unwrap_or_default();
+        if status == VaultStatus::None {
+            self.env().revert(VaultError::NoVault);
+        }
+
+        // Accrue interest first to get exact debt
+        self.accrue_interest(caller);
+
+        // Get current debt (now includes all accrued interest)
+        let current_debt = self.debt_principal.get(&caller).unwrap_or_default();
+        if current_debt == U256::zero() {
+            self.env().revert(VaultError::InsufficientDebt);
+        }
+
+        // Transfer mCSPR from user to this contract (requires prior approve)
+        let mcspr_addr = self.mcspr.get().expect("mCSPR not set");
+        let mut mcspr = MCSPRTokenContractRef::new(self.env().clone(), mcspr_addr);
+        let self_address = self.env().self_address();
+
+        // Check allowance - must be >= current debt
+        let allowance = mcspr.allowance(caller, self_address);
+        if allowance < current_debt {
+            self.env().revert(VaultError::InsufficientAllowance);
+        }
+
+        // Transfer from user to contract
+        mcspr.transfer_from(caller, self_address, current_debt);
+
+        // Burn the received mCSPR
+        mcspr.burn(self_address, current_debt);
+
+        // Update debt to zero
+        self.debt_principal.set(&caller, U256::zero());
+        let total = self.total_debt.get_or_default();
+        if total >= current_debt {
+            self.total_debt.set(total - current_debt);
+        }
+
+        self.env().emit_event(events::Repaid {
+            user: caller,
+            amount_wad: current_debt,
+            new_debt_wad: U256::zero(),
+        });
+    }
+
+    /// Withdraw maximum collateral while keeping LTV valid (≤80%).
+    /// Calculates exact max amount at execution time to handle real-time interest.
+    pub fn withdraw_max(&mut self) {
+        self.require_not_paused();
+        let caller = self.env().caller();
+
+        // Check vault exists and is active
+        let status = self.vault_status.get(&caller).unwrap_or_default();
+        if status == VaultStatus::None {
+            self.env().revert(VaultError::NoVault);
+        }
+        if status == VaultStatus::Withdrawing {
+            self.env().revert(VaultError::WithdrawPending);
+        }
+
+        // Accrue interest first
+        self.accrue_interest(caller);
+
+        let current_collateral = self.collateral.get(&caller).unwrap_or_default();
+        if current_collateral == U512::zero() {
+            self.env().revert(VaultError::InsufficientCollateral);
+        }
+
+        let debt = self.debt_principal.get(&caller).unwrap_or_default();
+
+        // Calculate max withdrawable amount
+        // If no debt, can withdraw everything
+        // If debt > 0, must keep: collateral_wad >= debt * BPS_DIVISOR / LTV_MAX_BPS
+        let max_withdraw_motes = if debt == U256::zero() {
+            current_collateral
+        } else {
+            // min_collateral_wad = debt * 10000 / 8000 = debt * 1.25
+            let min_collateral_wad = debt * U256::from(BPS_DIVISOR) / U256::from(LTV_MAX_BPS);
+            let current_collateral_wad = self.motes_to_wad(current_collateral);
+
+            if current_collateral_wad <= min_collateral_wad {
+                // Cannot withdraw anything
+                self.env().revert(VaultError::LtvExceeded);
+            }
+
+            let max_withdraw_wad = current_collateral_wad - min_collateral_wad;
+            self.wad_to_motes(max_withdraw_wad)
+        };
+
+        if max_withdraw_motes == U512::zero() {
+            self.env().revert(VaultError::InsufficientCollateral);
+        }
+
+        // Update collateral
+        let remaining_collateral = current_collateral - max_withdraw_motes;
+        self.collateral.set(&caller, remaining_collateral);
+        let total = self.total_collateral.get_or_default();
+        if total >= max_withdraw_motes {
+            self.total_collateral.set(total - max_withdraw_motes);
+        }
+
+        // Store pending withdrawal
+        self.pending_withdraw.set(&caller, max_withdraw_motes);
+        self.vault_status.set(&caller, VaultStatus::Withdrawing);
+
+        // Check if we need to undelegate
+        let liquid = self.env().self_balance();
+        if liquid < max_withdraw_motes {
+            let delegated = self.total_delegated.get_or_default();
+            let undelegate_amount = max_withdraw_motes.min(delegated);
+
+            if undelegate_amount > U512::zero() {
+                let validator_key = self.validator_public_key.get_or_default();
+                if !validator_key.is_empty() {
+                    let validator_pk = self.parse_validator_key(&validator_key);
+                    self.env().undelegate(validator_pk, undelegate_amount);
+                    self.total_delegated.set(delegated - undelegate_amount);
+
+                    self.env().emit_event(events::UndelegationRequested {
+                        amount_motes: undelegate_amount,
+                    });
+                }
+            }
+        }
+
+        self.env().emit_event(events::WithdrawRequested {
+            user: caller,
+            amount_motes: max_withdraw_motes,
+        });
+    }
+
     // ==========================================
     // View Functions
     // ==========================================
@@ -592,6 +730,32 @@ impl Magni {
     /// Get pending withdraw amount
     pub fn pending_withdraw_of(&self, user: Address) -> U512 {
         self.pending_withdraw.get(&user).unwrap_or_default()
+    }
+
+    /// Get maximum withdrawable amount while keeping LTV valid
+    /// Returns 0 if cannot withdraw anything
+    pub fn max_withdraw_of(&self, user: Address) -> U512 {
+        let current_collateral = self.collateral.get(&user).unwrap_or_default();
+        if current_collateral == U512::zero() {
+            return U512::zero();
+        }
+
+        let debt = self.debt_with_interest(user);
+        if debt == U256::zero() {
+            // No debt, can withdraw everything
+            return current_collateral;
+        }
+
+        // min_collateral_wad = debt * 10000 / 8000
+        let min_collateral_wad = debt * U256::from(BPS_DIVISOR) / U256::from(LTV_MAX_BPS);
+        let current_collateral_wad = self.motes_to_wad(current_collateral);
+
+        if current_collateral_wad <= min_collateral_wad {
+            return U512::zero();
+        }
+
+        let max_withdraw_wad = current_collateral_wad - min_collateral_wad;
+        self.wad_to_motes(max_withdraw_wad)
     }
 
     /// Get vault status

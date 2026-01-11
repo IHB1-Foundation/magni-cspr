@@ -1340,7 +1340,7 @@ function App() {
     }
   }, [activeKey, borrowAmount, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance, reloadVaultState])
 
-  // Approve mCSPR for repay
+  // Approve mCSPR for repay (specific amount)
   const handleApprove = useCallback(async () => {
     if (!activeKey || !mcsprPackageHashHex || !magniPackageHashHex) return
 
@@ -1364,6 +1364,28 @@ function App() {
 
     await buildAndSendDeploy(mcsprPackageHashHex, 'approve', args, setApproveTx, 'Approve')
   }, [activeKey, repayAmount, debtWad, mcsprPackageHashHex, magniPackageHashHex, buildAndSendDeploy])
+
+  // Approve all mCSPR for repay_all (adds 1% buffer for interest accrual)
+  const handleApproveAll = useCallback(async () => {
+    if (!activeKey || !mcsprPackageHashHex || !magniPackageHashHex) return
+
+    if (debtWad === 0n) {
+      setApproveTx({ status: 'error', error: 'No debt to repay' })
+      return
+    }
+
+    // Add 1% buffer for interest that accrues between approve and repay_all
+    const approveAmount = debtWad + (debtWad / 100n)
+
+    const args = RuntimeArgs.fromMap({
+      spender: CLValueBuilder.key(
+        CLValueBuilder.byteArray(hexToBytes(magniPackageHashHex))
+      ),
+      amount: CLValueBuilder.u256(approveAmount.toString()),
+    })
+
+    await buildAndSendDeploy(mcsprPackageHashHex, 'approve', args, setApproveTx, 'Approve All')
+  }, [activeKey, debtWad, mcsprPackageHashHex, magniPackageHashHex, buildAndSendDeploy])
 
   // Repay mCSPR debt
   const handleRepay = useCallback(async () => {
@@ -1410,6 +1432,20 @@ function App() {
     }
   }, [activeKey, withdrawAmount, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance, reloadVaultState])
 
+  // Withdraw max (calls contract's withdraw_max which calculates exact max on-chain)
+  const handleWithdrawMax = useCallback(async () => {
+    if (!activeKey || !magniPackageHashHex) return
+
+    const args = RuntimeArgs.fromMap({})
+
+    const success = await buildAndSendDeploy(magniPackageHashHex, 'withdraw_max', args, setWithdrawTx, 'Withdraw Max')
+    if (success) {
+      // Refresh from contract events to get authoritative state
+      void reloadVaultState()
+      void refreshCsprBalance()
+    }
+  }, [activeKey, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance, reloadVaultState])
+
   // Finalize withdraw
   const handleFinalizeWithdraw = useCallback(async () => {
     if (!activeKey || !magniPackageHashHex) return
@@ -1417,6 +1453,20 @@ function App() {
     const args = RuntimeArgs.fromMap({})
 
     const success = await buildAndSendDeploy(magniPackageHashHex, 'finalize_withdraw', args, setFinalizeTx, 'Finalize')
+    if (success) {
+      // Refresh from contract events to get authoritative state
+      void reloadVaultState()
+      void refreshCsprBalance()
+    }
+  }, [activeKey, magniPackageHashHex, buildAndSendDeploy, refreshCsprBalance, reloadVaultState])
+
+  // Repay all debt (calls contract's repay_all which calculates exact debt on-chain)
+  const handleRepayAll = useCallback(async () => {
+    if (!activeKey || !magniPackageHashHex) return
+
+    const args = RuntimeArgs.fromMap({})
+
+    const success = await buildAndSendDeploy(magniPackageHashHex, 'repay_all', args, setRepayTx, 'Repay All')
     if (success) {
       // Refresh from contract events to get authoritative state
       void reloadVaultState()
@@ -1695,6 +1745,16 @@ function App() {
                   placeholder={`Min ${MIN_DEPOSIT_CSPR.toString()} CSPR`}
                   disabled={!isConnected || !contractsConfigured || !proxyCallerWasmBytes || isAnyTxPending}
                 />
+                <button
+                  type="button"
+                  className="btn btn-outline btn-small"
+                  onClick={() => setDepositAmount(formatCSPR(csprAvailableMotes > ONE_CSPR ? csprAvailableMotes - ONE_CSPR : 0n))}
+                  disabled={!isConnected || csprAvailableMotes === 0n || isAnyTxPending}
+                  style={{ marginLeft: 8 }}
+                  title="Leave 1 CSPR for gas"
+                >
+                  Max
+                </button>
                 <span className="input-suffix">CSPR</span>
               </div>
               {depositAmount && parseCSPR(depositAmount) > 0n && (
@@ -1731,6 +1791,15 @@ function App() {
                   placeholder="Amount in mCSPR"
                   disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending}
                 />
+                <button
+                  type="button"
+                  className="btn btn-outline btn-small"
+                  onClick={() => setBorrowAmount(formatWad(availableToBorrow))}
+                  disabled={!isConnected || availableToBorrow === 0n || isAnyTxPending}
+                  style={{ marginLeft: 8 }}
+                >
+                  Max
+                </button>
                 <span className="input-suffix">mCSPR</span>
               </div>
               <button
@@ -1775,9 +1844,9 @@ function App() {
                   <button
                     onClick={handleApprove}
                     className="btn btn-secondary"
-                    disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending}
+                    disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending || parseCSPR(repayAmount) === 0n}
                   >
-                    Approve mCSPR
+                    Approve
                   </button>
                   {renderTxStatus(approveTx, 'Approve')}
                 </div>
@@ -1786,11 +1855,34 @@ function App() {
                   <button
                     onClick={handleRepay}
                     className="btn btn-primary"
-                    disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending}
+                    disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending || parseCSPR(repayAmount) === 0n}
                   >
                     Repay
                   </button>
                   {renderTxStatus(repayTx, 'Repay')}
+                </div>
+              </div>
+              <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #eee' }}>
+                <p style={{ fontSize: '0.85em', color: '#666', marginBottom: 8 }}>
+                  Or repay all debt (interest calculated on-chain):
+                </p>
+                <div className="step-actions">
+                  <button
+                    onClick={handleApproveAll}
+                    className="btn btn-secondary"
+                    disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending}
+                    title="Approve debt + 1% buffer for interest"
+                  >
+                    Approve All
+                  </button>
+                  <button
+                    onClick={handleRepayAll}
+                    className="btn btn-primary"
+                    disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending}
+                    title="Repay all debt including accrued interest (calculated on-chain)"
+                  >
+                    Repay All
+                  </button>
                 </div>
               </div>
             </div>
@@ -1829,15 +1921,34 @@ function App() {
                       placeholder="Amount in CSPR"
                       disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending}
                     />
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-small"
+                      onClick={() => setWithdrawAmount(formatCSPR(maxWithdrawMotes))}
+                      disabled={!isConnected || maxWithdrawMotes === 0n || isAnyTxPending}
+                      style={{ marginLeft: 8 }}
+                    >
+                      Max
+                    </button>
                     <span className="input-suffix">CSPR</span>
                   </div>
-                  <button
-                    onClick={handleRequestWithdraw}
-                    className="btn btn-primary"
-                    disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending}
-                  >
-                    Request Withdraw
-                  </button>
+                  <div className="step-actions" style={{ marginTop: 12 }}>
+                    <button
+                      onClick={handleRequestWithdraw}
+                      className="btn btn-primary"
+                      disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending || parseCSPR(withdrawAmount) === 0n}
+                    >
+                      Withdraw
+                    </button>
+                    <button
+                      onClick={handleWithdrawMax}
+                      className="btn btn-secondary"
+                      disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending || maxWithdrawMotes === 0n}
+                      title="Withdraw maximum while keeping LTV valid (calculated on-chain)"
+                    >
+                      Withdraw All
+                    </button>
+                  </div>
                   {renderTxStatus(withdrawTx, 'Withdraw')}
                 </>
               )}
