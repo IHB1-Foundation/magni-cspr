@@ -869,6 +869,16 @@ async function fetchMcsprBalanceFromContract(
       console.log('[fetchMcsprBalance] Total supply query failed:', e)
     }
 
+    // Diagnostic: Query minter to verify it's set to Magni (not deployer account)
+    const minterKey = computeOdraVarKey(ODRA_FIELD_INDEX_MCSPR.MINTER)
+    console.log('[fetchMcsprBalance] Minter key (for diagnostic):', minterKey)
+    try {
+      const minterResult = await queryDictionaryItem(stateRootHash, entityHashHex, 'state', minterKey)
+      console.log('[fetchMcsprBalance] *** MINTER result (IMPORTANT!) ***:', JSON.stringify(minterResult, null, 2))
+    } catch (e) {
+      console.log('[fetchMcsprBalance] Minter query failed:', e)
+    }
+
     // Try multiple field indices to find the correct one for balances
     // MCSPRToken fields: name(1), symbol(2), decimals(3), total_supply(4), balances(5), allowances(6), minter(7)
     // But if Odra adds __events_length at the beginning, indices shift by 1
