@@ -261,18 +261,49 @@ impl MCSPRToken {
     }
 
     /// Mint tokens (only minter can call)
+    /// Uses package hash comparison to handle Casper 2.0 Entity/Package address mismatch
     pub fn mint(&mut self, to: Address, amount: U256) {
         let caller = self.env().caller();
-        if self.minter.get() != Some(caller) {
+        let minter = self.minter.get();
+
+        // Compare by contract package hash only (not full Address)
+        // This handles Casper 2.0 where cross-contract caller may have different Address representation
+        let authorized = match (&minter, caller.as_contract_package_hash()) {
+            (Some(m), Some(caller_pkg)) => {
+                // Both are contracts - compare package hashes
+                m.as_contract_package_hash() == Some(caller_pkg)
+            }
+            (Some(m), None) => {
+                // Caller is account, minter is set - check exact match
+                *m == caller
+            }
+            _ => false,
+        };
+
+        if !authorized {
             self.env().revert(TokenError::Unauthorized);
         }
         self._mint(to, amount);
     }
 
     /// Burn tokens (only minter can call, burns from target address)
+    /// Uses package hash comparison to handle Casper 2.0 Entity/Package address mismatch
     pub fn burn(&mut self, from: Address, amount: U256) {
         let caller = self.env().caller();
-        if self.minter.get() != Some(caller) {
+        let minter = self.minter.get();
+
+        // Compare by contract package hash only
+        let authorized = match (&minter, caller.as_contract_package_hash()) {
+            (Some(m), Some(caller_pkg)) => {
+                m.as_contract_package_hash() == Some(caller_pkg)
+            }
+            (Some(m), None) => {
+                *m == caller
+            }
+            _ => false,
+        };
+
+        if !authorized {
             self.env().revert(TokenError::Unauthorized);
         }
         self._burn(from, amount);
