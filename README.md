@@ -1,20 +1,23 @@
-# Magni Protocol - Casper Network
+# Magni Protocol (Casper)
 
-Leverage staking protocol on Casper Network. Deposit collateral, borrow against it with up to 5x leverage, and earn staking rewards.
+Magni V2 is a **CSPR vault** on Casper Network:
+- Users deposit native CSPR as collateral.
+- The protocol delegates pooled collateral to a validator (staking).
+- Users can borrow **mCSPR** (debt token) up to **80% LTV**.
+- Debt accrues **2% APR** interest.
+- Withdrawals are **2-step** due to Casper unbonding: `request_withdraw` -> `finalize_withdraw`.
 
-## Architecture
+Leverage looping (e.g. `mCSPR -> swap -> CSPR -> deposit`) is intentionally **out of scope** and should be done externally.
+
+## Repo Structure
 
 ```
 magni-casper/
-├── casper/
-│   ├── magni_casper/     # Odra smart contracts (Rust/WASM)
-│   │   ├── src/
-│   │   │   ├── tokens.rs     # tCSPR (faucet) + mCSPR (debt token)
-│   │   │   ├── magni.rs      # Core lending/borrowing logic
-│   │   │   └── styks_external.rs  # Styks oracle interface
-│   │   └── wasm/             # Compiled WASM contracts
-│   └── frontend/         # React dApp (Vite + TypeScript)
-└── package.json          # Workspace root
+  casper/
+    magni_casper/     # Odra smart contracts (Rust/WASM)
+    frontend/         # React dApp (Vite + TypeScript)
+  package.json        # Workspace root (pnpm scripts)
+  pnpm-workspace.yaml
 ```
 
 ## Key Parameters
@@ -22,87 +25,96 @@ magni-casper/
 | Parameter | Value |
 |-----------|-------|
 | LTV (Loan-to-Value) | 80% |
-| Max Leverage | 5x |
-| Liquidation Threshold | 85% |
-| Liquidator Bonus | 5% |
-| Oracle | Styks TWAP (CSPR/USD) |
+| Interest Rate | 2% APR |
+| Min Deposit | 500 CSPR |
+| Withdrawal | 2-step (unbonding delay ~14h on testnet) |
+
+## Docs
+
+- Demo steps (copy/paste): `SCENARIO.md`
+- Testnet deploy (recommended): `casper/DEPLOY.md`
+- Deployed contract history: `casper/CONTRACTS.md`
 
 ## Quick Start
 
 ### Prerequisites
 
-- [Rust nightly](https://rustup.rs/) (nightly-2025-01-05)
-- [Odra CLI](https://odra.dev/)
-- [pnpm](https://pnpm.io/)
-- [Casper Wallet](https://www.casperwallet.io/) browser extension
+- Rust nightly (nightly-2025-01-05)
+- Odra CLI (`cargo-odra`)
+- Node.js + pnpm
+- Casper Wallet browser extension (Testnet)
 
-### Contracts (Odra/Rust)
+### 1) Install tooling (one-time)
 
 ```bash
-cd casper/magni_casper
-
-# Run tests
-cargo odra test
-
-# Build WASM contracts
-cargo odra build
-
-# Deploy to testnet (requires .env with CASPER_SECRET_KEY)
-cargo run --bin magni_livenet --release
+bash casper/scripts/setup.sh
 ```
 
-### Frontend (React)
+### 2) Deploy contracts to Casper Testnet (recommended)
+
+Follow `casper/DEPLOY.md` for the full flow. In short:
 
 ```bash
-cd casper/frontend
+cp casper/.env.example casper/.env
+# Edit casper/.env with your values, then:
+set -a && source casper/.env && set +a
 
-# Install dependencies
+bash casper/scripts/testnet_deploy_and_wire_frontend.sh
+```
+
+This will also wire the frontend by writing:
+- `casper/frontend/.env.local`
+- `casper/frontend/src/config/contracts.generated.ts`
+
+### 3) Run the frontend
+
+```bash
 pnpm install
-
-# Copy and configure environment
-cp .env.example .env
-# Edit .env with deployed contract hashes
-
-# Start dev server
-pnpm dev
+pnpm frontend:dev
 ```
 
-## Contracts
+Default URL: `http://127.0.0.1:5173`
 
-### tCSPR (Test CSPR)
-CEP-18 token with public faucet for testnet usage.
+## Contracts (high-level)
 
-### mCSPR (Magni CSPR)
-Debt token minted when borrowing, burned when repaying. Minter-controlled.
-
-### Magni
-Core protocol contract:
-- `open_position(collateral_amount, leverage)` - Deposit and borrow
-- `close_position()` - Repay debt and withdraw collateral
-- `liquidate(user)` - Liquidate unhealthy positions
-- `get_price()` - Query oracle price (via Styks)
+- `mCSPR`: CEP-18 debt token (Magni-only mint/burn)
+- `Magni (V2)`: vault contract entrypoints used by the dApp:
+  - `deposit()` (payable)
+  - `borrow(amount_wad)`
+  - `repay(amount_wad)` (requires `mCSPR.approve(...)` first)
+  - `repay_all()`
+  - `request_withdraw(amount_motes)`
+  - `finalize_withdraw()`
 
 ## Environment Variables
 
-### Contracts (.env)
+### Contracts (Odra livenet env)
+
+See `casper/.env.example` and `casper/DEPLOY.md`. The deploy script expects:
+
 ```
-CASPER_SECRET_KEY=<your-testnet-secret-key>
-CASPER_NODE_ADDRESS=https://rpc.testnet.casperlabs.io/rpc
-CASPER_CHAIN_NAME=casper-test
-STYKS_PRICE_FEED_PACKAGE_HASH=<styks-contract-hash>
-STYKS_PRICE_FEED_ID=CSPR/USD
-DEFAULT_VALIDATOR_PUBLIC_KEY=<validator-pubkey>
+ODRA_CASPER_LIVENET_SECRET_KEY_PATH=/ABS/PATH/to/secret_key.pem
+ODRA_CASPER_LIVENET_NODE_ADDRESS=https://node.testnet.casper.network
+ODRA_CASPER_LIVENET_EVENTS_URL=https://node.testnet.casper.network/events
+ODRA_CASPER_LIVENET_CHAIN_NAME=casper-test
+
+# Optional
+DEFAULT_VALIDATOR_PUBLIC_KEY=01...
 ```
 
-### Frontend (.env)
+### Frontend (Vite env)
+
+The deploy script auto-writes `casper/frontend/.env.local`. The app uses `VITE_*` values (or falls back to `contracts.generated.ts`).
+
 ```
 VITE_CASPER_CHAIN_NAME=casper-test
-VITE_CASPER_NODE_URL=https://rpc.testnet.casperlabs.io/rpc
-VITE_TCSPR_CONTRACT_HASH=<deployed-tcspr-hash>
-VITE_MCSPR_CONTRACT_HASH=<deployed-mcspr-hash>
-VITE_MAGNI_CONTRACT_HASH=<deployed-magni-hash>
+VITE_CASPER_NODE_URL=/rpc
+VITE_MCSPR_CONTRACT_HASH=<...>
+VITE_MAGNI_CONTRACT_HASH=<...>
+VITE_DEFAULT_VALIDATOR_PUBLIC_KEY=01...
 ```
 
 ## License
 
 ISC
+
