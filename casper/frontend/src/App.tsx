@@ -506,12 +506,28 @@ async function resolveEntityHashHexFromContractPackageHash(contractPackageHashHe
 
 async function getEventsLengthForEntity(entityHashHex: string): Promise<number> {
   try {
+    // First get the contract's named keys to find __events_length URef
+    const contractResult = await jsonRpc<{
+      stored_value?: { Contract?: { named_keys?: Array<{ name: string; key: string }> } }
+    }>('query_global_state', {
+      state_identifier: null,
+      key: `hash-${entityHashHex}`,
+      path: [],
+    })
+
+    const namedKeys = contractResult.stored_value?.Contract?.named_keys
+    if (!namedKeys) return 0
+
+    const eventsLengthKey = namedKeys.find(nk => nk.name === '__events_length')
+    if (!eventsLengthKey) return 0
+
+    // Query the URef directly
     const result = await jsonRpc<{
       stored_value?: { CLValue?: { parsed?: unknown } }
     }>('query_global_state', {
       state_identifier: null,
-      key: `hash-${entityHashHex}`,
-      path: ['events_length'],
+      key: eventsLengthKey.key,
+      path: [],
     })
     const parsed = result.stored_value?.CLValue?.parsed
     if (typeof parsed === 'number') return parsed
@@ -535,7 +551,7 @@ async function getEventAtIndexForEntity(
       dictionary_identifier: {
         ContractNamedKey: {
           key: `hash-${entityHashHex}`,
-          dictionary_name: 'events',
+          dictionary_name: '__events',  // Odra uses double underscore prefix
           dictionary_item_key: index.toString(),
         },
       },
@@ -1925,24 +1941,25 @@ function App() {
               <p>Deposit native CSPR as collateral. Your CSPR will be delegated to validators for staking rewards.</p>
               <p style={{ fontSize: '0.9em', color: '#888' }}>Minimum deposit: {MIN_DEPOSIT_CSPR.toString()} CSPR (required for delegation)</p>
               <div className="input-group">
-                <input
-                  type="text"
-                  value={depositAmount}
-                  onChange={(e) => setDepositAmount(e.target.value)}
-                  placeholder={`Min ${MIN_DEPOSIT_CSPR.toString()} CSPR`}
-                  disabled={!isConnected || !contractsConfigured || !proxyCallerWasmBytes || isAnyTxPending}
-                />
-                <button
-                  type="button"
-                  className="btn btn-outline btn-small"
-                  onClick={() => setDepositAmount(formatCSPR(csprAvailableMotes > ONE_CSPR ? csprAvailableMotes - ONE_CSPR : 0n))}
-                  disabled={!isConnected || csprAvailableMotes === 0n || isAnyTxPending}
-                  style={{ marginLeft: 8 }}
-                  title="Leave 1 CSPR for gas"
-                >
-                  Max
-                </button>
-                <span className="input-suffix">CSPR</span>
+                <div className="input-row">
+                  <input
+                    type="text"
+                    value={depositAmount}
+                    onChange={(e) => setDepositAmount(e.target.value)}
+                    placeholder={`Min ${MIN_DEPOSIT_CSPR.toString()} CSPR`}
+                    disabled={!isConnected || !contractsConfigured || !proxyCallerWasmBytes || isAnyTxPending}
+                  />
+                  <button
+                    type="button"
+                    className="btn-max"
+                    onClick={() => setDepositAmount(formatCSPR(csprAvailableMotes > ONE_CSPR ? csprAvailableMotes - ONE_CSPR : 0n))}
+                    disabled={!isConnected || csprAvailableMotes === 0n || isAnyTxPending}
+                    title="Leave 1 CSPR for gas"
+                  >
+                    Max
+                  </button>
+                  <span className="input-unit">CSPR</span>
+                </div>
               </div>
               {depositAmount && parseCSPR(depositAmount) > 0n && (
                 <div className="info-row" style={{ marginBottom: '0.5rem', fontSize: '0.9em', color: parseCSPR(depositAmount) < MIN_DEPOSIT_MOTES ? '#e74c3c' : '#666' }}>
@@ -1971,23 +1988,24 @@ function App() {
                 <strong>{formatWad(availableToBorrow)} mCSPR</strong>
               </div>
               <div className="input-group">
-                <input
-                  type="text"
-                  value={borrowAmount}
-                  onChange={(e) => setBorrowAmount(e.target.value)}
-                  placeholder="Amount in mCSPR"
-                  disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending}
-                />
-                <button
-                  type="button"
-                  className="btn btn-outline btn-small"
-                  onClick={() => setBorrowAmount(formatWad(availableToBorrow))}
-                  disabled={!isConnected || availableToBorrow === 0n || isAnyTxPending}
-                  style={{ marginLeft: 8 }}
-                >
-                  Max
-                </button>
-                <span className="input-suffix">mCSPR</span>
+                <div className="input-row">
+                  <input
+                    type="text"
+                    value={borrowAmount}
+                    onChange={(e) => setBorrowAmount(e.target.value)}
+                    placeholder="Amount in mCSPR"
+                    disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending}
+                  />
+                  <button
+                    type="button"
+                    className="btn-max"
+                    onClick={() => setBorrowAmount(formatWad(availableToBorrow))}
+                    disabled={!isConnected || availableToBorrow === 0n || isAnyTxPending}
+                  >
+                    Max
+                  </button>
+                  <span className="input-unit">mCSPR</span>
+                </div>
               </div>
               <button
                 onClick={handleBorrow}
@@ -2007,23 +2025,24 @@ function App() {
                 <strong>{formatWad(debtWad)} mCSPR</strong>
               </div>
               <div className="input-group">
-                <input
-                  type="text"
-                  value={repayAmount}
-                  onChange={(e) => setRepayAmount(e.target.value)}
-                  placeholder="Amount in mCSPR"
-                  disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending}
-                />
-                <button
-                  type="button"
-                  className="btn btn-outline btn-small"
-                  onClick={() => setRepayAmount(formatWad(debtWad))}
-                  disabled={!isConnected || debtWad === 0n || isAnyTxPending}
-                  style={{ marginLeft: 8 }}
-                >
-                  Max
-                </button>
-                <span className="input-suffix">mCSPR</span>
+                <div className="input-row">
+                  <input
+                    type="text"
+                    value={repayAmount}
+                    onChange={(e) => setRepayAmount(e.target.value)}
+                    placeholder="Amount in mCSPR"
+                    disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending}
+                  />
+                  <button
+                    type="button"
+                    className="btn-max"
+                    onClick={() => setRepayAmount(formatWad(debtWad))}
+                    disabled={!isConnected || debtWad === 0n || isAnyTxPending}
+                  >
+                    Max
+                  </button>
+                  <span className="input-unit">mCSPR</span>
+                </div>
               </div>
               <div className="step-actions">
                 <div className="step">
@@ -2101,23 +2120,24 @@ function App() {
               ) : (
                 <>
                   <div className="input-group">
-                    <input
-                      type="text"
-                      value={withdrawAmount}
-                      onChange={(e) => setWithdrawAmount(e.target.value)}
-                      placeholder="Amount in CSPR"
-                      disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending}
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-outline btn-small"
-                      onClick={() => setWithdrawAmount(formatCSPR(maxWithdrawMotes))}
-                      disabled={!isConnected || maxWithdrawMotes === 0n || isAnyTxPending}
-                      style={{ marginLeft: 8 }}
-                    >
-                      Max
-                    </button>
-                    <span className="input-suffix">CSPR</span>
+                    <div className="input-row">
+                      <input
+                        type="text"
+                        value={withdrawAmount}
+                        onChange={(e) => setWithdrawAmount(e.target.value)}
+                        placeholder="Amount in CSPR"
+                        disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending}
+                      />
+                      <button
+                        type="button"
+                        className="btn-max"
+                        onClick={() => setWithdrawAmount(formatCSPR(maxWithdrawMotes))}
+                        disabled={!isConnected || maxWithdrawMotes === 0n || isAnyTxPending}
+                      >
+                        Max
+                      </button>
+                      <span className="input-unit">CSPR</span>
+                    </div>
                   </div>
                   <div className="step-actions" style={{ marginTop: 12 }}>
                     <button
