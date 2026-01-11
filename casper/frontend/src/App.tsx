@@ -574,53 +574,70 @@ async function fetchMcsprBalanceFromContract(
     // Get entity hash from package hash
     const entityHashHex = await resolveEntityHashHexFromContractPackageHash(tokenPackageHashHex)
     console.log('[fetchMcsprBalance] Entity hash:', entityHashHex)
+    console.log('[fetchMcsprBalance] User account hash:', userAccountHashHex)
 
-    // In Odra, Mapping keys are serialized as: Address enum tag (1 byte) + hash (32 bytes)
-    // For AccountHash: tag=0 + account_hash
-    // The dictionary key is the base64 of this serialized key
-    const keyBytes = new Uint8Array(33)
-    keyBytes[0] = 0 // Account tag
-    const hashBytes = hexToBytes(userAccountHashHex)
-    keyBytes.set(hashBytes, 1)
+    // In Odra, Mapping<Address, V> keys are serialized as: Address enum tag (1 byte) + hash (32 bytes)
+    // For AccountHash: tag=0 + account_hash (hex encoded)
+    const keyHex = '00' + userAccountHashHex.toLowerCase()
+    console.log('[fetchMcsprBalance] Dictionary key (hex):', keyHex)
 
-    // Convert to base64 for dictionary key (Odra uses base64-encoded keys for Mapping)
-    const keyBase64 = btoa(String.fromCharCode(...keyBytes))
-    console.log('[fetchMcsprBalance] Dictionary key (base64):', keyBase64)
+    const stateRootHash = await getStateRootHash()
 
-    // Query the balances dictionary
-    const result = await jsonRpc<{
-      stored_value?: { CLValue?: { bytes?: string; parsed?: string } }
-    }>('state_get_dictionary_item', {
-      state_root_hash: await getStateRootHash(),
-      dictionary_identifier: {
-        ContractNamedKey: {
-          key: `hash-${entityHashHex}`,
-          dictionary_name: 'balances',
-          dictionary_item_key: keyBase64,
-        },
-      },
-    })
+    // Try multiple key formats since Odra's exact format may vary
+    const keyFormats = [
+      keyHex,                                          // hex: 00 + account_hash
+      userAccountHashHex.toLowerCase(),                // just account hash
+      `account-hash-${userAccountHashHex.toLowerCase()}`, // account-hash-xxx format
+    ]
 
-    console.log('[fetchMcsprBalance] Result:', result)
+    for (const key of keyFormats) {
+      try {
+        console.log('[fetchMcsprBalance] Trying key format:', key)
+        const result = await jsonRpc<{
+          stored_value?: { CLValue?: { bytes?: string; parsed?: string | number } }
+        }>('state_get_dictionary_item', {
+          state_root_hash: stateRootHash,
+          dictionary_identifier: {
+            ContractNamedKey: {
+              key: `hash-${entityHashHex}`,
+              dictionary_name: 'balances',
+              dictionary_item_key: key,
+            },
+          },
+        })
 
-    // Parse U256 from CLValue
-    const parsed = result.stored_value?.CLValue?.parsed
-    if (parsed !== undefined && parsed !== null) {
-      // parsed could be a string representation of the number
-      return BigInt(parsed)
+        console.log('[fetchMcsprBalance] Result for key', key, ':', result)
+
+        // Parse U256 from CLValue
+        const parsed = result.stored_value?.CLValue?.parsed
+        if (parsed !== undefined && parsed !== null) {
+          const value = BigInt(parsed)
+          if (value > 0n) {
+            console.log('[fetchMcsprBalance] Found balance:', value.toString())
+            return value
+          }
+        }
+
+        // Try parsing from bytes if parsed is not available
+        const bytesHex = result.stored_value?.CLValue?.bytes
+        if (bytesHex) {
+          const bytes = hexToBytes(bytesHex)
+          const { value } = parseU256(bytes, 0)
+          if (value > 0n) {
+            console.log('[fetchMcsprBalance] Found balance from bytes:', value.toString())
+            return value
+          }
+        }
+      } catch (e) {
+        // Key format didn't work, try next
+        console.log('[fetchMcsprBalance] Key format failed:', key, e)
+      }
     }
 
-    // Try parsing from bytes if parsed is not available
-    const bytesHex = result.stored_value?.CLValue?.bytes
-    if (bytesHex) {
-      const bytes = hexToBytes(bytesHex)
-      const { value } = parseU256(bytes, 0)
-      return value
-    }
-
+    console.log('[fetchMcsprBalance] No balance found with any key format')
     return 0n
   } catch (err) {
-    console.log('[fetchMcsprBalance] Error (may be no balance yet):', err)
+    console.log('[fetchMcsprBalance] Error:', err)
     return 0n
   }
 }
