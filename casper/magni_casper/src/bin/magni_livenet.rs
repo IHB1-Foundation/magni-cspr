@@ -26,7 +26,7 @@
 //! - MAGNI_DEMO_BORROW_CSPR                  (default: 50 -- will be converted to wad)
 //! - MAGNI_DEMO_REQUEST_WITHDRAW             ("1" to request withdraw after borrow; default: 1)
 
-use odra::host::{Deployer, HostRef};
+use odra::host::{Deployer, HostRef, HostRefLoader};
 use odra::prelude::*;
 use odra::casper_types::{U256, U512};
 
@@ -100,17 +100,16 @@ fn main() {
     // ==========================================
     // Step 1: Deploy (or reuse) mCSPR
     // ==========================================
-    let mcspr_addr = if should_deploy {
+    let mcspr = if should_deploy {
         println!("[STEP 1] Deploying mCSPR token...");
         env.set_gas(deploy_gas_token);
         let mcspr = MCSPRToken::deploy(&env, MCSPRTokenInitArgs { minter: env.caller() });
-        let addr = mcspr.address();
-        println!("[OK] mCSPR deployed at: {:?}", addr);
+        println!("[OK] mCSPR deployed at: {:?}", mcspr.address());
         println!("     Name: {}", mcspr.name());
         println!("     Symbol: {}", mcspr.symbol());
         println!("     Minter: {:?}", mcspr.minter());
         println!();
-        addr
+        mcspr
     } else {
         println!("[STEP 1] Reusing existing mCSPR token...");
         let raw = std::env::var("MAGNI_EXISTING_MCSPR")
@@ -118,13 +117,14 @@ fn main() {
         let addr = parse_contract_address(&raw);
         println!("[OK] mCSPR: {:?}", addr);
         println!();
-        addr
+        MCSPRToken::load(&env, addr)
     };
+    let mcspr_addr = mcspr.address();
 
     // ==========================================
     // Step 2: Deploy (or reuse) Magni V2
     // ==========================================
-    let magni_addr = if should_deploy {
+    let magni = if should_deploy {
         println!("[STEP 2] Deploying Magni V2 Vault contract...");
         env.set_gas(deploy_gas_magni);
         let magni = Magni::deploy(
@@ -134,12 +134,11 @@ fn main() {
                 validator_public_key: validator_public_key.clone(),
             },
         );
-        let addr = magni.address();
-        println!("[OK] Magni V2 deployed at: {:?}", addr);
+        println!("[OK] Magni V2 deployed at: {:?}", magni.address());
         println!("     mCSPR: {:?}", magni.mcspr());
         println!("     Validator public key: {}", magni.validator_public_key());
         println!();
-        addr
+        magni
     } else {
         println!("[STEP 2] Reusing existing Magni V2 contract...");
         let raw = std::env::var("MAGNI_EXISTING_MAGNI")
@@ -147,19 +146,20 @@ fn main() {
         let addr = parse_contract_address(&raw);
         println!("[OK] Magni V2: {:?}", addr);
         println!();
-        addr
+        Magni::load(&env, addr)
     };
+    let magni_addr = magni.address();
 
     // ==========================================
     // Step 3: Set mCSPR minter to Magni (CRITICAL - must succeed for borrow to work)
     // ==========================================
     let mcspr = if should_query {
         println!("[STEP 3] Skipping minter check (query mode)...");
-        MCSPRTokenHostRef::new(mcspr_addr, env.clone())
+        mcspr
     } else {
         println!("[STEP 3] Setting mCSPR minter to Magni...");
         env.set_gas(call_gas);
-        let mut mcspr = MCSPRTokenHostRef::new(mcspr_addr, env.clone());
+        let mut mcspr = mcspr;
         let current_minter = mcspr.minter();
 
         println!("     Current minter: {:?}", current_minter);
@@ -202,7 +202,7 @@ fn main() {
     // Demo: V2 flow (deposit -> borrow -> request_withdraw -> finalize)
     // ==========================================
     if should_demo || should_finalize {
-        let mut magni = MagniHostRef::new(magni_addr, env.clone());
+        let mut magni = magni;
         let caller = env.caller();
 
         if should_demo {
@@ -373,20 +373,44 @@ fn format_address_hash(addr: &Address) -> String {
 }
 
 fn parse_contract_address(raw: &str) -> Address {
-    use std::str::FromStr;
-    let trimmed = raw.trim();
-    let cleaned = trimmed
-        .strip_prefix("hash-")
-        .or_else(|| trimmed.strip_prefix("contract-package-"))
-        .or_else(|| trimmed.strip_prefix("package-"))
-        .or_else(|| trimmed.strip_prefix("account-hash-"))
-        .unwrap_or(trimmed)
-        .trim();
+    use odra::casper_types::contracts::ContractPackageHash;
+    use odra::casper_types::account::AccountHash;
 
-    if cleaned.len() == 64 && cleaned.chars().all(|c| c.is_ascii_hexdigit()) {
-        Address::from_str(&format!("hash-{}", cleaned))
-            .unwrap_or_else(|_| panic!("Invalid contract hash (expected 64 hex): {}", trimmed))
-    } else {
-        Address::from_str(trimmed).unwrap_or_else(|_| panic!("Invalid address format: {}", trimmed))
+    fn decode_hex_32(s: &str) -> [u8; 32] {
+        let mut out = [0u8; 32];
+        if s.len() != 64 || !s.chars().all(|c| c.is_ascii_hexdigit()) {
+            panic!("Invalid address hash (expected 64 hex): {}", s);
+        }
+        for i in 0..32 {
+            let byte = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16)
+                .unwrap_or_else(|_| panic!("Invalid hex in address: {}", s));
+            out[i] = byte;
+        }
+        out
     }
+
+    let trimmed = raw.trim();
+    if let Some(hex) = trimmed.strip_prefix("account-hash-") {
+        let bytes = decode_hex_32(hex);
+        return Address::Account(AccountHash::new(bytes));
+    }
+    if let Some(hex) = trimmed.strip_prefix("contract-package-") {
+        let bytes = decode_hex_32(hex);
+        return Address::Contract(ContractPackageHash::new(bytes));
+    }
+    if let Some(hex) = trimmed.strip_prefix("package-") {
+        let bytes = decode_hex_32(hex);
+        return Address::Contract(ContractPackageHash::new(bytes));
+    }
+    if let Some(hex) = trimmed.strip_prefix("hash-") {
+        let bytes = decode_hex_32(hex);
+        return Address::Contract(ContractPackageHash::new(bytes));
+    }
+
+    if trimmed.len() == 64 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+        let bytes = decode_hex_32(trimmed);
+        return Address::Contract(ContractPackageHash::new(bytes));
+    }
+
+    panic!("Invalid address format: {}", trimmed);
 }

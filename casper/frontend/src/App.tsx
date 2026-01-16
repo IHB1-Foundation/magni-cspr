@@ -11,19 +11,19 @@ import { blake2b } from 'blakejs'
 import { generatedConfig } from './config/contracts.generated'
 import proxyCallerWasmUrl from './assets/proxy_caller_with_return.wasm?url'
 
-// Config from env with generated config fallback
-const CHAIN_NAME = import.meta.env.VITE_CASPER_CHAIN_NAME || generatedConfig.chainName || 'casper-test'
+// Config from generated values first; env only if generated is missing.
+const CHAIN_NAME = generatedConfig.chainName || import.meta.env.VITE_CASPER_CHAIN_NAME || 'casper-test'
 const NODE_URL_RAW =
-  import.meta.env.VITE_CASPER_NODE_URL || generatedConfig.nodeUrl || ''
+  generatedConfig.nodeUrl || import.meta.env.VITE_CASPER_NODE_URL || ''
 
 // Always use same-origin `/rpc` to avoid CORS issues in browsers.
 // - Dev: Vite proxies `/rpc` to a Casper node (see `vite.config.ts`)
 // - Prod: hosting should provide `/rpc` (e.g. Vercel function + rewrite)
 const NODE_URL = '/rpc'
 
-const MCSPR_HASH = import.meta.env.VITE_MCSPR_CONTRACT_HASH || generatedConfig.mcsprContractHash || ''
-const MAGNI_HASH = import.meta.env.VITE_MAGNI_CONTRACT_HASH || generatedConfig.magniContractHash || ''
-const VALIDATOR_KEY = import.meta.env.VITE_DEFAULT_VALIDATOR_PUBLIC_KEY || generatedConfig.defaultValidatorPublicKey || ''
+const MCSPR_HASH = generatedConfig.mcsprContractHash || import.meta.env.VITE_MCSPR_CONTRACT_HASH || ''
+const MAGNI_HASH = generatedConfig.magniContractHash || import.meta.env.VITE_MAGNI_CONTRACT_HASH || ''
+const VALIDATOR_KEY = generatedConfig.defaultValidatorPublicKey || import.meta.env.VITE_DEFAULT_VALIDATOR_PUBLIC_KEY || ''
 
 // Contract event URefs are now fetched dynamically from contract named keys
 

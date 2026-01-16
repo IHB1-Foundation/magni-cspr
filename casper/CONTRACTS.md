@@ -77,3 +77,15 @@ Note: Mint authorization issue - set_minter failed silently.
 | mCSPR | `1fcde96b464c9312f1ca2c11e3120d13cb2caeced83879ec5c0dca4acd1f21e9` |
 
 Note: Magni deployment failed due to insufficient available funds (Casper 2.0 gas-hold).
+
+## Deployment: 2026-01-15T22:55:46Z
+
+| Field | Value |
+|-------|-------|
+| Network | casper-test |
+| Node RPC | https://node.testnet.casper.network |
+| mCSPR | `d7f571a31d5fc7f6a3abd7d8a501ed7243b60fe950dd328aa90805ccae719ef8` |
+| Magni | `aecf3a9598a7a5bf27411aaae982bbadd881172006a06ef388a5d6f6e33c309c` |
+| Validator | `012b365e09c5d75187b4abc25c4aa28109133bab6a256ef4abe24348073e590d80` |
+
+---
