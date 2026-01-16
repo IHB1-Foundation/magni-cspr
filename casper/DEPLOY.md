@@ -183,11 +183,16 @@ Vite `import.meta.env.VITE_*` values are injected **at build time only**.
 This repo uses `casper/frontend/src/config/contracts.generated.ts` as a fallback, so the simplest operational flow is:
 - Deploy via the script (`testnet_deploy_and_wire_frontend.sh`) so `contracts.generated.ts` is updated, then build/deploy the frontend.
 
-Alternatively, you can provide these directly in Vercel as `VITE_*` env vars:
+Contract hashes are **committed** in `contracts.generated.ts` and are not read from `VITE_*` env vars.
+
+If you need to update contract hashes for Vercel:
+1) Redeploy via the script (it rewrites `contracts.generated.ts`)
+2) Commit/push the updated file
+3) Trigger a new Vercel build
+
+You may still provide these via Vercel env vars if needed:
 - `VITE_CASPER_CHAIN_NAME`
 - `VITE_CASPER_NODE_URL` (recommended: empty or `/rpc` — same-origin proxy)
-- `VITE_MCSPR_CONTRACT_HASH`
-- `VITE_MAGNI_CONTRACT_HASH`
 - `VITE_DEFAULT_VALIDATOR_PUBLIC_KEY`
 
 ## (Optional) Redeploy Magni only (reuse existing token deployments)

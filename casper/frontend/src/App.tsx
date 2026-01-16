@@ -21,8 +21,8 @@ const NODE_URL_RAW =
 // - Prod: hosting should provide `/rpc` (e.g. Vercel function + rewrite)
 const NODE_URL = '/rpc'
 
-const MCSPR_HASH = generatedConfig.mcsprContractHash || import.meta.env.VITE_MCSPR_CONTRACT_HASH || ''
-const MAGNI_HASH = generatedConfig.magniContractHash || import.meta.env.VITE_MAGNI_CONTRACT_HASH || ''
+const MCSPR_HASH = generatedConfig.mcsprContractHash || ''
+const MAGNI_HASH = generatedConfig.magniContractHash || ''
 const VALIDATOR_KEY = generatedConfig.defaultValidatorPublicKey || import.meta.env.VITE_DEFAULT_VALIDATOR_PUBLIC_KEY || ''
 
 // Contract event URefs are now fetched dynamically from contract named keys
@@ -2609,10 +2609,9 @@ function App() {
             <h2>Contracts</h2>
             {!contractsConfigured ? (
               <>
-                <p>Contract hashes not configured. Set them in .env file:</p>
+                <p>Contract hashes not configured. Regenerate and commit:</p>
                 <ul className="contract-list">
-                  <li>VITE_MCSPR_CONTRACT_HASH</li>
-                  <li>VITE_MAGNI_CONTRACT_HASH</li>
+                  <li>casper/frontend/src/config/contracts.generated.ts</li>
                 </ul>
               </>
             ) : (

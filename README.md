@@ -104,13 +104,12 @@ DEFAULT_VALIDATOR_PUBLIC_KEY=01...
 
 ### Frontend (Vite env)
 
-The deploy script auto-writes `casper/frontend/.env.local`. The app uses `VITE_*` values (or falls back to `contracts.generated.ts`).
+The deploy script auto-writes `casper/frontend/src/config/contracts.generated.ts` with contract hashes.
+The app only reads contract hashes from that file (no VITE override).
 
 ```
 VITE_CASPER_CHAIN_NAME=casper-test
 VITE_CASPER_NODE_URL=/rpc
-VITE_MCSPR_CONTRACT_HASH=<...>
-VITE_MAGNI_CONTRACT_HASH=<...>
 VITE_DEFAULT_VALIDATOR_PUBLIC_KEY=01...
 ```
 
