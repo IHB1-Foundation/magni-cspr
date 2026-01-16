@@ -6,7 +6,7 @@ Build a leverage-staking prototype that runs on Casper Testnet.
 
 ## Minimal Hackathon Design
 - Collateral asset: tCSPR (CEP-18 test token) treated as the “staking asset” (simplified)
-- Synthetic asset: mCSPR (CEP-18) — only the Magni contract can mint/burn
+- Synthetic asset: mCSPR (CEP-18 standard) — only the Magni contract can mint/burn
 - Leverage loop:
   1) Deposit tCSPR (= stake & collateralize)
   2) Mint mCSPR (= borrow)

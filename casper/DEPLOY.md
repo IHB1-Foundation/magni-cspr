@@ -133,6 +133,10 @@ Verify in the browser:
   - deposit → borrow → (mCSPR approve) → repay → request_withdraw → finalize_withdraw
   - Note: `finalize_withdraw()` can fail before unbonding completes.
 
+CEP-18 check (explorer):
+- After a successful `borrow`, the mCSPR balance should appear under the account’s **Tokens** tab on `cspr.live`.
+- If it doesn’t, open the mCSPR contract package page and confirm CEP-18 metadata (name/symbol/decimals/total_supply) is visible.
+
 ## 6) Where to check outputs (files)
 
 - Latest deployment record: `casper/CONTRACTS.md`

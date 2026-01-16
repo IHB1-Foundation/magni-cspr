@@ -13,6 +13,7 @@ use odra_modules::cep18::storage::{
     Cep18AllowancesStorage, Cep18BalancesStorage, Cep18DecimalsStorage, Cep18NameStorage,
     Cep18SymbolStorage, Cep18TotalSupplyStorage,
 };
+use odra_modules::cep18_token::Cep18;
 
 /// Extract 64-char hex hash from debug representation of Address
 /// This helps compare addresses that may have different wrapper types in Casper 2.0
@@ -255,12 +256,7 @@ impl TCSPRToken {
     errors = TokenError
 )]
 pub struct MCSPRToken {
-    name: SubModule<Cep18NameStorage>,
-    symbol: SubModule<Cep18SymbolStorage>,
-    decimals: SubModule<Cep18DecimalsStorage>,
-    total_supply: SubModule<Cep18TotalSupplyStorage>,
-    balances: SubModule<Cep18BalancesStorage>,
-    allowances: SubModule<Cep18AllowancesStorage>,
+    token: SubModule<Cep18>,
     minter: Var<Address>,
 }
 
@@ -268,12 +264,7 @@ pub struct MCSPRToken {
 impl MCSPRToken {
     /// Initialize the token with minter address
     pub fn init(&mut self, minter: Address) {
-        self.name.set("Magni CSPR".to_string());
-        self.symbol.set("mCSPR".to_string());
-        self.decimals.set(18u8);
-        self.total_supply.set(U256::zero());
-        self.allowances.init();
-        self.balances.init();
+        self.token.init("mCSPR".to_string(), "Magni CSPR".to_string(), 18u8, U256::zero());
         self.minter.set(minter);
         self.env().emit_event(events::MinterSet {
             old_minter: None,
@@ -302,117 +293,57 @@ impl MCSPRToken {
 
     /// Token name
     pub fn name(&self) -> String {
-        self.name.get()
+        self.token.name()
     }
 
     /// Token symbol
     pub fn symbol(&self) -> String {
-        self.symbol.get()
+        self.token.symbol()
     }
 
     /// Token decimals
     pub fn decimals(&self) -> u8 {
-        self.decimals.get()
+        self.token.decimals()
     }
 
     /// Total supply
     pub fn total_supply(&self) -> U256 {
-        self.total_supply.get()
+        self.token.total_supply()
     }
 
     /// Balance of an address
     pub fn balance_of(&self, owner: Address) -> U256 {
-        self.balances.get(&owner).unwrap_or_default()
+        self.token.balance_of(&owner)
     }
 
     /// Allowance from owner to spender
     pub fn allowance(&self, owner: Address, spender: Address) -> U256 {
-        self.allowances.get_or_default(&owner, &spender)
+        self.token.allowance(&owner, &spender)
     }
 
     /// Transfer tokens
     pub fn transfer(&mut self, recipient: Address, amount: U256) {
-        let sender = self.env().caller();
-        if sender == recipient {
-            self.env().revert(TokenError::CannotTargetSelfUser);
-        }
-        self.raw_transfer(&sender, &recipient, &amount);
-        self.env().emit_event(Transfer {
-            sender,
-            recipient,
-            amount,
-        });
+        self.token.transfer(&recipient, &amount);
     }
 
     /// Approve spender
     pub fn approve(&mut self, spender: Address, amount: U256) {
-        let owner = self.env().caller();
-        if owner == spender {
-            self.env().revert(TokenError::CannotTargetSelfUser);
-        }
-        self.allowances.set(&owner, &spender, amount);
-        self.env().emit_event(SetAllowance {
-            owner,
-            spender,
-            allowance: amount,
-        });
+        self.token.approve(&spender, &amount);
     }
 
     /// Increase allowance
     pub fn increase_allowance(&mut self, spender: Address, amount: U256) {
-        let owner = self.env().caller();
-        if owner == spender {
-            self.env().revert(TokenError::CannotTargetSelfUser);
-        }
-        let allowance = self.allowances.get_or_default(&owner, &spender);
-        let new_allowance = allowance.saturating_add(amount);
-        self.allowances.set(&owner, &spender, new_allowance);
-        self.env().emit_event(IncreaseAllowance {
-            owner,
-            spender,
-            allowance: new_allowance,
-            inc_by: amount,
-        });
+        self.token.increase_allowance(&spender, &amount);
     }
 
     /// Decrease allowance
     pub fn decrease_allowance(&mut self, spender: Address, amount: U256) {
-        let owner = self.env().caller();
-        if owner == spender {
-            self.env().revert(TokenError::CannotTargetSelfUser);
-        }
-        let allowance = self.allowances.get_or_default(&owner, &spender);
-        let new_allowance = allowance.saturating_sub(amount);
-        self.allowances.set(&owner, &spender, new_allowance);
-        self.env().emit_event(DecreaseAllowance {
-            owner,
-            spender,
-            allowance: new_allowance,
-            decr_by: amount,
-        });
+        self.token.decrease_allowance(&spender, &amount);
     }
 
     /// Transfer from (with allowance)
     pub fn transfer_from(&mut self, owner: Address, recipient: Address, amount: U256) {
-        if owner == recipient {
-            self.env().revert(TokenError::CannotTargetSelfUser);
-        }
-        if amount.is_zero() {
-            return;
-        }
-        let spender = self.env().caller();
-        let allowance = self.allowances.get_or_default(&owner, &spender);
-        if allowance < amount {
-            self.env().revert(TokenError::InsufficientAllowance);
-        }
-        self.allowances.set(&owner, &spender, allowance - amount);
-        self.raw_transfer(&owner, &recipient, &amount);
-        self.env().emit_event(TransferFrom {
-            spender,
-            owner,
-            recipient,
-            amount,
-        });
+        self.token.transfer_from(&owner, &recipient, &amount);
     }
 
     /// Mint tokens (only minter can call)
@@ -422,7 +353,7 @@ impl MCSPRToken {
         if !self.is_authorized_minter(&caller) {
             self.env().revert(TokenError::Unauthorized);
         }
-        self.raw_mint(&to, &amount);
+        self.token.raw_mint(&to, &amount);
     }
 
     /// Burn tokens (only minter can call, burns from target address)
@@ -432,43 +363,7 @@ impl MCSPRToken {
         if !self.is_authorized_minter(&caller) {
             self.env().revert(TokenError::Unauthorized);
         }
-        self.raw_burn(&from, &amount);
-    }
-
-    // Internal transfer
-    fn raw_transfer(&mut self, sender: &Address, recipient: &Address, amount: &U256) {
-        let balance = self.balances.get(sender).unwrap_or_default();
-        if balance < *amount {
-            self.env().revert(TokenError::InsufficientBalance);
-        }
-        if !amount.is_zero() {
-            self.balances.subtract(sender, *amount);
-            self.balances.add(recipient, *amount);
-        }
-    }
-
-    // Internal mint
-    fn raw_mint(&mut self, owner: &Address, amount: &U256) {
-        self.total_supply.add(*amount);
-        self.balances.add(owner, *amount);
-        self.env().emit_event(Mint {
-            recipient: owner.clone(),
-            amount: *amount,
-        });
-    }
-
-    // Internal burn
-    fn raw_burn(&mut self, owner: &Address, amount: &U256) {
-        let balance = self.balances.get(owner).unwrap_or_default();
-        if balance < *amount {
-            self.env().revert(TokenError::InsufficientBalance);
-        }
-        self.balances.subtract(owner, *amount);
-        self.total_supply.subtract(*amount);
-        self.env().emit_event(Burn {
-            owner: owner.clone(),
-            amount: *amount,
-        });
+        self.token.raw_burn(&from, &amount);
     }
 
     // Check if caller is authorized minter

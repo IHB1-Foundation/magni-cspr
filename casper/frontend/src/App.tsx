@@ -177,6 +177,20 @@ function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
+function bytesToBase64(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString('base64')
+}
+
+// Compute CEP-18 balance dictionary key (base64 of Key::Account bytes)
+function computeCep18BalanceKey(accountHashHex: string): string {
+  const hashBytes = hexToBytes(accountHashHex)
+  if (hashBytes.length !== 32) return ''
+  const keyBytes = new Uint8Array(33)
+  keyBytes[0] = 0x00 // Key::Account tag
+  keyBytes.set(hashBytes, 1)
+  return bytesToBase64(keyBytes)
+}
+
 // Compute Odra dictionary key for Var<T> (simple value, no mapping key)
 // The dictionary_item_key is: hex(blake2b(index_u32_be))
 function computeOdraVarKey(fieldIndex: number): string {
@@ -235,9 +249,8 @@ const ODRA_FIELD_INDEX_MAGNI = {
   PENDING_WITHDRAW: 7, // pending_withdraw: Mapping<Address, U512>
 } as const
 
-// Field indices for MCSPRToken contract fields
-// IMPORTANT: Odra module indices start from 1, not 0!
-// See: casper/magni_casper/src/tokens.rs - MCSPRToken struct
+// Field indices for legacy MCSPRToken contract fields (pre-CEP18 standardization).
+// Only used as a fallback if the CEP-18 named keys lookup fails.
 const ODRA_FIELD_INDEX_MCSPR = {
   NAME: 1,             // name: Var<String>
   SYMBOL: 2,           // symbol: Var<String>
@@ -859,64 +872,22 @@ async function fetchMcsprBalanceFromContract(
 
     const stateRootHash = await getStateRootHash()
 
-    // Diagnostic: Try to query total_supply (Var<U256> at index 4) to verify entity hash works
-    const totalSupplyKey = computeOdraVarKey(ODRA_FIELD_INDEX_MCSPR.TOTAL_SUPPLY)
-    console.log('[fetchMcsprBalance] Total supply key (for diagnostic):', totalSupplyKey)
-    try {
-      const totalSupplyResult = await queryDictionaryItem(stateRootHash, entityHashHex, 'state', totalSupplyKey)
-      console.log('[fetchMcsprBalance] Total supply result:', JSON.stringify(totalSupplyResult, null, 2))
-    } catch (e) {
-      console.log('[fetchMcsprBalance] Total supply query failed:', e)
-    }
+    const parseBalanceResult = (result: any): bigint | null => {
+      if (!result?.stored_value?.CLValue) return null
 
-    // Diagnostic: Query minter to verify it's set to Magni (not deployer account)
-    const minterKey = computeOdraVarKey(ODRA_FIELD_INDEX_MCSPR.MINTER)
-    console.log('[fetchMcsprBalance] Minter key (for diagnostic):', minterKey)
-    try {
-      const minterResult = await queryDictionaryItem(stateRootHash, entityHashHex, 'state', minterKey)
-      console.log('[fetchMcsprBalance] *** MINTER result (IMPORTANT!) ***:', JSON.stringify(minterResult, null, 2))
-    } catch (e) {
-      console.log('[fetchMcsprBalance] Minter query failed:', e)
-    }
-
-    // Try multiple field indices to find the correct one for balances
-    // MCSPRToken fields: name(1), symbol(2), decimals(3), total_supply(4), balances(5), allowances(6), minter(7)
-    // But if Odra adds __events_length at the beginning, indices shift by 1
-    const indicesToTry = [5, 6, 4, 7] // Try 5 first (expected), then others
-    for (const fieldIdx of indicesToTry) {
-      const testKey = computeOdraMappingKey(fieldIdx, userAccountHashHex)
-      console.log(`[fetchMcsprBalance] Trying field index ${fieldIdx}, key: ${testKey}`)
-      try {
-        const testResult = await queryDictionaryItem(stateRootHash, entityHashHex, 'state', testKey)
-        if (testResult?.stored_value?.CLValue) {
-          console.log(`[fetchMcsprBalance] Found value at index ${fieldIdx}:`, JSON.stringify(testResult, null, 2))
-        }
-      } catch (e) {
-        console.log(`[fetchMcsprBalance] Index ${fieldIdx} query failed:`, e)
-      }
-    }
-
-    // Compute Odra dictionary key for balances Mapping (index 5 in MCSPRToken)
-    const balanceKey = computeOdraMappingKey(ODRA_FIELD_INDEX_MCSPR.BALANCES, userAccountHashHex)
-    console.log('[fetchMcsprBalance] Balance key (hashed):', balanceKey)
-    console.log('[fetchMcsprBalance] Field index used:', ODRA_FIELD_INDEX_MCSPR.BALANCES)
-
-    const result = await queryDictionaryItem(stateRootHash, entityHashHex, 'state', balanceKey)
-
-    if (result?.stored_value?.CLValue) {
       console.log('[fetchMcsprBalance] Result:', JSON.stringify(result, null, 2))
 
       // Parse U256 from CLValue
       const parsed = result.stored_value.CLValue.parsed
       // Odra stores values as Vec<u8> (List U8), so parsed is an array of bytes
       if (Array.isArray(parsed)) {
-        // Convert array to Uint8Array and parse as U256
         const bytes = new Uint8Array(parsed)
         const { value } = parseU256(bytes, 0)
         console.log('[fetchMcsprBalance] Found balance from array:', value.toString())
         return value
-      } else if (parsed !== undefined && parsed !== null) {
-        // Direct numeric value (shouldn't happen with Odra, but fallback)
+      }
+
+      if (parsed !== undefined && parsed !== null) {
         const value = BigInt(String(parsed))
         console.log('[fetchMcsprBalance] Found balance:', value.toString())
         return value
@@ -931,8 +902,35 @@ async function fetchMcsprBalanceFromContract(
         console.log('[fetchMcsprBalance] Found balance from bytes:', value.toString())
         return value
       }
-    } else {
-      console.log('[fetchMcsprBalance] No result or CLValue - raw result:', JSON.stringify(result, null, 2))
+
+      return null
+    }
+
+    // CEP-18 standard path: balances dictionary keyed by base64(Key::Account)
+    const balanceKey = computeCep18BalanceKey(userAccountHashHex)
+    if (balanceKey) {
+      console.log('[fetchMcsprBalance] CEP-18 balance key (base64):', balanceKey)
+      try {
+        const result = await queryDictionaryItem(stateRootHash, entityHashHex, 'balances', balanceKey)
+        const value = parseBalanceResult(result)
+        if (value !== null) return value
+      } catch (e) {
+        console.log('[fetchMcsprBalance] CEP-18 balance query failed:', e)
+      }
+    }
+
+    // Legacy Odra state dictionary fallback (pre-CEP18 standardization)
+    const indicesToTry = [ODRA_FIELD_INDEX_MCSPR.BALANCES, 6, 4, 7]
+    for (const fieldIdx of indicesToTry) {
+      const testKey = computeOdraMappingKey(fieldIdx, userAccountHashHex)
+      console.log(`[fetchMcsprBalance] Legacy index ${fieldIdx}, key: ${testKey}`)
+      try {
+        const testResult = await queryDictionaryItem(stateRootHash, entityHashHex, 'state', testKey)
+        const value = parseBalanceResult(testResult)
+        if (value !== null) return value
+      } catch (e) {
+        console.log(`[fetchMcsprBalance] Legacy index ${fieldIdx} query failed:`, e)
+      }
     }
 
     console.log('[fetchMcsprBalance] No balance found')

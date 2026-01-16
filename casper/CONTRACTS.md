@@ -89,3 +89,15 @@ Note: Magni deployment failed due to insufficient available funds (Casper 2.0 ga
 | Validator | `012b365e09c5d75187b4abc25c4aa28109133bab6a256ef4abe24348073e590d80` |
 
 ---
+
+## Deployment: 2026-01-16T00:41:08Z
+
+| Field | Value |
+|-------|-------|
+| Network | casper-test |
+| Node RPC | https://node.testnet.casper.network |
+| mCSPR | `51287deca421ade3004f3ab541446df9ffea9e57bb6c5e4e9ec04b7f37f5642a` |
+| Magni | `0cea175f12786a2473c2a81a3646bb3fe4064c0b74911871f1bf2281dfa28bed` |
+| Validator | `012b365e09c5d75187b4abc25c4aa28109133bab6a256ef4abe24348073e590d80` |
+
+---

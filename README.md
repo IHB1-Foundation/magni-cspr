@@ -77,7 +77,7 @@ Default URL: `http://127.0.0.1:5173`
 
 ## Contracts (high-level)
 
-- `mCSPR`: CEP-18 debt token (Magni-only mint/burn)
+- `mCSPR`: CEP-18 **standard** debt token (Magni-only mint/burn)
 - `Magni (V2)`: vault contract entrypoints used by the dApp:
   - `deposit()` (payable)
   - `borrow(amount_wad)`
@@ -117,4 +117,3 @@ VITE_DEFAULT_VALIDATOR_PUBLIC_KEY=01...
 ## License
 
 ISC
-
