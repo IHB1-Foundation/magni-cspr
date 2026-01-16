@@ -628,7 +628,7 @@ async function resolveEntityHashHexFromContractPackageHash(contractPackageHashHe
 async function fetchMagniPositionDirect(
   magniPackageHashHex: string,
   userAccountHashHex: string
-): Promise<{ collateralMotes: bigint; debtWad: bigint } | null> {
+): Promise<{ collateralMotes: bigint; debtWad: bigint; pendingWithdrawMotes: bigint; vaultStatus: VaultStatusType } | null> {
   try {
     const entityHashHex = await resolveEntityHashHexFromContractPackageHash(magniPackageHashHex)
     console.log('[fetchMagniPosition] Package hash:', magniPackageHashHex)
@@ -638,14 +638,20 @@ async function fetchMagniPositionDirect(
     console.log('[fetchMagniPosition] State root:', stateRootHash)
     console.log('[fetchMagniPosition] User account hash:', userAccountHashHex)
 
-    // Compute Odra dictionary keys for collateral and debt Mappings
+    // Compute Odra dictionary keys for collateral/debt/pending/status Mappings
     const collateralKey = computeOdraMappingKey(ODRA_FIELD_INDEX_MAGNI.COLLATERAL, userAccountHashHex)
     const debtKey = computeOdraMappingKey(ODRA_FIELD_INDEX_MAGNI.DEBT_PRINCIPAL, userAccountHashHex)
+    const pendingKey = computeOdraMappingKey(ODRA_FIELD_INDEX_MAGNI.PENDING_WITHDRAW, userAccountHashHex)
+    const statusKey = computeOdraMappingKey(ODRA_FIELD_INDEX_MAGNI.VAULT_STATUS, userAccountHashHex)
     console.log('[fetchMagniPosition] Collateral key (hashed):', collateralKey)
     console.log('[fetchMagniPosition] Debt key (hashed):', debtKey)
+    console.log('[fetchMagniPosition] Pending key (hashed):', pendingKey)
+    console.log('[fetchMagniPosition] Status key (hashed):', statusKey)
 
     let collateralMotes = 0n
     let debtWad = 0n
+    let pendingWithdrawMotes = 0n
+    let vaultStatus: VaultStatusType = VaultStatus.None
 
     // Query collateral from "state" dictionary (Mapping<Address, U512>)
     const collResult = await queryDictionaryItem(stateRootHash, entityHashHex, 'state', collateralKey)
@@ -705,8 +711,59 @@ async function fetchMagniPositionDirect(
       console.log('[fetchMagniPosition] No debt found for user')
     }
 
-    console.log('[fetchMagniPosition] Final:', { collateralMotes: collateralMotes.toString(), debtWad: debtWad.toString() })
-    return { collateralMotes, debtWad }
+    // Query pending_withdraw from "state" dictionary (Mapping<Address, U512>)
+    const pendingResult = await queryDictionaryItem(stateRootHash, entityHashHex, 'state', pendingKey)
+    if (pendingResult?.stored_value?.CLValue) {
+      console.log('[fetchMagniPosition] Pending result:', JSON.stringify(pendingResult, null, 2))
+      const parsed = pendingResult.stored_value.CLValue.parsed
+      if (Array.isArray(parsed)) {
+        const bytes = new Uint8Array(parsed)
+        const { value } = parseU512(bytes, 0)
+        pendingWithdrawMotes = value
+      } else if (parsed !== null && parsed !== undefined) {
+        pendingWithdrawMotes = BigInt(String(parsed))
+      } else {
+        const bytesHex = pendingResult.stored_value.CLValue.bytes
+        if (bytesHex) {
+          const bytes = hexToBytes(bytesHex)
+          const { value } = parseU512(bytes, 4)
+          pendingWithdrawMotes = value
+        }
+      }
+    } else {
+      console.log('[fetchMagniPosition] No pending withdraw found for user')
+    }
+
+    // Query vault_status from "state" dictionary (Mapping<Address, VaultStatus>)
+    const statusResult = await queryDictionaryItem(stateRootHash, entityHashHex, 'state', statusKey)
+    if (statusResult?.stored_value?.CLValue) {
+      console.log('[fetchMagniPosition] Status result:', JSON.stringify(statusResult, null, 2))
+      const parsed = statusResult.stored_value.CLValue.parsed
+      if (typeof parsed === 'number') {
+        vaultStatus = parsed as VaultStatusType
+      } else if (typeof parsed === 'string') {
+        const num = Number(parsed)
+        if (!Number.isNaN(num)) vaultStatus = num as VaultStatusType
+      } else if (Array.isArray(parsed) && parsed.length > 0) {
+        vaultStatus = Number(parsed[0]) as VaultStatusType
+      } else {
+        const bytesHex = statusResult.stored_value.CLValue.bytes
+        if (bytesHex && bytesHex.length >= 2) {
+          const bytes = hexToBytes(bytesHex)
+          vaultStatus = Number(bytes[0]) as VaultStatusType
+        }
+      }
+    } else {
+      console.log('[fetchMagniPosition] No vault status found for user')
+    }
+
+    console.log('[fetchMagniPosition] Final:', {
+      collateralMotes: collateralMotes.toString(),
+      debtWad: debtWad.toString(),
+      pendingWithdrawMotes: pendingWithdrawMotes.toString(),
+      vaultStatus
+    })
+    return { collateralMotes, debtWad, pendingWithdrawMotes, vaultStatus }
   } catch (err) {
     console.error('[fetchMagniPosition] Error:', err)
     return null
@@ -1287,17 +1344,24 @@ function App() {
         if (directState) {
           console.log('[reloadVaultState] Direct state result:', {
             collateralMotes: directState.collateralMotes.toString(),
-            debtWad: directState.debtWad.toString()
+            debtWad: directState.debtWad.toString(),
+            pendingWithdrawMotes: directState.pendingWithdrawMotes.toString(),
+            vaultStatus: directState.vaultStatus
           })
 
           // If we got non-zero values from direct query, use them
-          if (directState.collateralMotes > 0n || directState.debtWad > 0n) {
+          if (directState.collateralMotes > 0n || directState.debtWad > 0n || directState.pendingWithdrawMotes > 0n) {
             setCollateralMotes(directState.collateralMotes)
             setDebtWad(directState.debtWad)
+            setPendingWithdrawMotes(directState.pendingWithdrawMotes)
 
-            // Set vault status based on collateral
-            if (directState.collateralMotes > 0n) {
+            // Prefer on-chain vault status if present; otherwise fall back to collateral
+            if (directState.vaultStatus !== VaultStatus.None) {
+              setVaultStatus(directState.vaultStatus)
+            } else if (directState.collateralMotes > 0n) {
               setVaultStatus(VaultStatus.Active)
+            } else {
+              setVaultStatus(VaultStatus.None)
             }
 
             // Calculate LTV
