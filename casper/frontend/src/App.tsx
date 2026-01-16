@@ -2523,6 +2523,7 @@ function App() {
                     </div>
                     <div style={{ marginTop: '0.25rem', fontSize: '0.9em', opacity: 0.8 }}>
                       Wait for unbonding period to complete, then click "Finalize Withdraw".
+                      While pending, you cannot create another withdrawal request.
                     </div>
                   </div>
                   <button
