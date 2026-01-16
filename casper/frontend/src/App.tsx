@@ -12,7 +12,7 @@ import { generatedConfig } from './config/contracts.generated'
 import proxyCallerWasmUrl from './assets/proxy_caller_with_return.wasm?url'
 
 // Config from generated values first; env only if generated is missing.
-const CHAIN_NAME = generatedConfig.chainName || import.meta.env.VITE_CASPER_CHAIN_NAME || 'casper-test'
+const CHAIN_NAME: string = generatedConfig.chainName || import.meta.env.VITE_CASPER_CHAIN_NAME || 'casper-test'
 const NODE_URL_RAW =
   generatedConfig.nodeUrl || import.meta.env.VITE_CASPER_NODE_URL || ''
 
