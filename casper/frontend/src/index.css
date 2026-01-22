@@ -2089,3 +2089,136 @@ body.demo-mode {
 .demo-mode .app {
   margin-top: 1rem;
 }
+
+/* ===== Dashboard ===== */
+
+.dashboard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1.25rem;
+}
+
+.dashboard-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dashboard-demo-badge {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  background: rgba(139, 92, 246, 0.2);
+  color: #a78bfa;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.dashboard-kpis {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.kpi-card {
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 0.75rem;
+  text-align: center;
+}
+
+.kpi-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.kpi-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.dashboard-charts {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.mini-chart {
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.mini-chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.mini-chart-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.mini-chart-change {
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.mini-chart-change.positive {
+  color: var(--success);
+}
+
+.mini-chart-change.negative {
+  color: var(--error);
+}
+
+.mini-chart-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.mini-chart-empty {
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.dashboard-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+}
+
+.summary-row span {
+  color: var(--text-muted);
+}
+
+.summary-row strong {
+  color: var(--text);
+}

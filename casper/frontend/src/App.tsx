@@ -19,6 +19,7 @@ import { SkeletonVaultSummary, SkeletonActivityList, SkeletonBalanceRow } from '
 import ThemeToggle from './components/ThemeToggle'
 import DemoBanner from './components/DemoBanner'
 import useDemo, { DEMO_DATA } from './hooks/useDemo'
+import Dashboard from './components/Dashboard'
 
 // Config from generated values first; env only if generated is missing.
 const CHAIN_NAME: string = generatedConfig.chainName || import.meta.env.VITE_CASPER_CHAIN_NAME || 'casper-test'
@@ -2256,9 +2257,20 @@ function App() {
           </section>
         ) : activePage === 'portfolio' ? (
           <section className="main-left">
+            {(displayIsConnected || isDemoMode) && (
+              <Dashboard
+                collateralMotes={displayCollateralMotes}
+                debtWad={displayDebtWad}
+                ltvBps={displayLtvBps}
+                mCSPRBalance={displayMCSPRBalance}
+                csprTotalMotes={displayCsprTotalMotes}
+                isDemo={isDemoMode}
+              />
+            )}
+
             <div className="card">
               <h2>Portfolio</h2>
-              {!isConnected ? (
+              {!displayIsConnected ? (
                 <div className="connect-prompt">
                   <p>Connect your wallet to view your portfolio.</p>
                   <button type="button" className="btn btn-primary" onClick={connect}>
