@@ -20,6 +20,7 @@ import ThemeToggle from './components/ThemeToggle'
 import DemoBanner from './components/DemoBanner'
 import useDemo, { DEMO_DATA } from './hooks/useDemo'
 import Dashboard from './components/Dashboard'
+import HowItWorks from './components/HowItWorks'
 
 // Config from generated values first; env only if generated is missing.
 const CHAIN_NAME: string = generatedConfig.chainName || import.meta.env.VITE_CASPER_CHAIN_NAME || 'casper-test'
@@ -2243,17 +2244,7 @@ function App() {
       <main className="main">
         {activePage === 'howItWorks' ? (
           <section className="main-left" style={{ gridColumn: '1 / -1' }}>
-            <div className="card">
-              <h2>How It Works</h2>
-              <p>Full explanation coming in T29. For now, use the deposit flow to get started.</p>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => setActivePage('deposit')}
-              >
-                Go to Deposit
-              </button>
-            </div>
+            <HowItWorks onGetStarted={() => setActivePage('deposit')} />
           </section>
         ) : activePage === 'portfolio' ? (
           <section className="main-left">
