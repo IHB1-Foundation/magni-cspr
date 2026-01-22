@@ -1,27 +1,21 @@
 import { FC, useEffect, useState } from 'react'
 
-type Theme = 'light' | 'dark' | 'system'
+type Theme = 'light' | 'dark'
 
 const THEME_KEY = 'magni-theme'
 
-function getSystemTheme(): 'light' | 'dark' {
-  if (typeof window === 'undefined') return 'dark'
-  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
-}
-
 function getInitialTheme(): Theme {
-  if (typeof window === 'undefined') return 'system'
+  if (typeof window === 'undefined') return 'dark'
   const stored = localStorage.getItem(THEME_KEY)
-  if (stored === 'light' || stored === 'dark' || stored === 'system') {
+  if (stored === 'light' || stored === 'dark') {
     return stored
   }
-  return 'system'
+  return 'dark'
 }
 
 function applyTheme(theme: Theme) {
   const root = document.documentElement
-  const resolved = theme === 'system' ? getSystemTheme() : theme
-  root.setAttribute('data-theme', resolved)
+  root.setAttribute('data-theme', theme)
 }
 
 export const ThemeToggle: FC = () => {
@@ -32,34 +26,21 @@ export const ThemeToggle: FC = () => {
     localStorage.setItem(THEME_KEY, theme)
   }, [theme])
 
-  // Listen for system theme changes
-  useEffect(() => {
-    if (theme !== 'system') return
-
-    const mq = window.matchMedia('(prefers-color-scheme: light)')
-    const handleChange = () => applyTheme('system')
-    mq.addEventListener('change', handleChange)
-    return () => mq.removeEventListener('change', handleChange)
-  }, [theme])
-
   const cycleTheme = () => {
     setTheme((prev) => {
       if (prev === 'dark') return 'light'
-      if (prev === 'light') return 'system'
       return 'dark'
     })
   }
 
   const getIcon = () => {
     if (theme === 'light') return '☀️'
-    if (theme === 'dark') return '🌙'
-    return '⚙️'
+    return '🌙'
   }
 
   const getLabel = () => {
     if (theme === 'light') return 'Light'
-    if (theme === 'dark') return 'Dark'
-    return 'System'
+    return 'Dark'
   }
 
   return (

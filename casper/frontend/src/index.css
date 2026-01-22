@@ -107,7 +107,7 @@ body {
   display: flex;
   gap: 0.5rem;
   padding: 0.35rem;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 999px;
 }
@@ -116,7 +116,7 @@ body {
   appearance: none;
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--text-muted);
   font-size: 0.9rem;
   font-weight: 600;
   padding: 0.55rem 0.9rem;
@@ -125,8 +125,8 @@ body {
 }
 
 .nav-link:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.9);
+  background: var(--surface-2);
+  color: var(--text);
 }
 
 .nav-link:active {
@@ -134,8 +134,8 @@ body {
 }
 
 .nav-link.active {
-  background: rgba(255, 255, 255, 0.16);
-  color: rgba(255, 255, 255, 1);
+  background: var(--surface-3);
+  color: var(--text);
 }
 
 .nav-link:focus-visible {
@@ -226,32 +226,32 @@ body {
 
 /* Primary action button - prominent CTA */
 .btn-primary {
-  background: linear-gradient(135deg, #ffffff 0%, #e8e8e8 100%);
-  color: #0a0a0a;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
+  color: var(--primary-fg);
   box-shadow:
-    0 2px 8px rgba(255, 255, 255, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+    0 2px 8px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, #ffffff 0%, #f5f5f5 100%);
+  background: linear-gradient(135deg, var(--primary-hover) 0%, var(--primary) 100%);
   box-shadow:
-    0 4px 20px rgba(255, 255, 255, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    0 4px 20px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
   transform: translateY(-1px);
 }
 
 /* Secondary button - less prominent actions */
 .btn-secondary {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--secondary);
+  color: var(--text);
+  border: 1px solid var(--border);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.25);
+  background: var(--secondary-hover);
+  border-color: var(--ring);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   transform: translateY(-1px);
 }
@@ -259,13 +259,13 @@ body {
 /* Outline button - tertiary actions */
 .btn-outline {
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--border);
+  color: var(--text);
 }
 
 .btn-outline:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.3);
+  background: var(--surface);
+  border-color: var(--ring);
 }
 
 .btn-small {
@@ -907,6 +907,10 @@ body {
   background-clip: text;
 }
 
+[data-theme="light"] .landing-title {
+  background: linear-gradient(135deg, #111111 0%, rgba(17,17,17,0.75) 100%);
+}
+
 .landing-subtitle {
   font-size: clamp(1rem, 2.5vw, 1.25rem);
   color: var(--text-muted);
@@ -931,8 +935,20 @@ body {
 /* Metrics Grid */
 .landing-metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 1rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 520px) {
+  .landing-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .landing-metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 .metric-card {
@@ -948,7 +964,7 @@ body {
 }
 
 .metric-card:hover {
-  border-color: rgba(255,255,255,0.25);
+  border-color: var(--ring);
   transform: translateY(-2px);
 }
 
@@ -982,9 +998,33 @@ body {
 /* Features */
 .landing-features {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 1.5rem;
   margin-top: 1rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 640px) {
+  .landing-features {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .landing-features .feature-item:last-child {
+    grid-column: 1 / -1;
+    max-width: 520px;
+    justify-self: center;
+  }
+}
+
+@media (min-width: 960px) {
+  .landing-features {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .landing-features .feature-item:last-child {
+    grid-column: auto;
+    max-width: none;
+    justify-self: stretch;
+  }
 }
 
 .feature-item {

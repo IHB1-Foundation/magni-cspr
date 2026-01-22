@@ -2740,7 +2740,8 @@ function App() {
           </section>
         )}
 
-        <aside className="main-right">
+        {activePage !== 'howItWorks' && (
+          <aside className="main-right">
           <div className={`card ${isConnected ? 'connected' : ''}`}>
             <h2>Wallet</h2>
             {!provider ? (
@@ -2894,7 +2895,7 @@ function App() {
             />
           )}
 
-          {activePage !== 'portfolio' && activePage !== 'howItWorks' && (
+          {activePage === 'deposit' && (
             <div className={`card ${vaultStatus !== VaultStatus.None ? 'connected' : ''}`}>
               <h2>Vault</h2>
 
@@ -2966,7 +2967,8 @@ function App() {
               )}
             </ul>
           </div>
-        </aside>
+          </aside>
+        )}
       </main>
       )}
 
