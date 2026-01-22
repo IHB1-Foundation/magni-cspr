@@ -12,6 +12,8 @@ import { generatedConfig } from './config/contracts.generated'
 import proxyCallerWasmUrl from './assets/proxy_caller_with_return.wasm?url'
 import Landing from './components/Landing'
 import OnboardingStepper from './components/OnboardingStepper'
+import { ToastContainer, ToastData } from './components/Toast'
+import TxModal, { TxModalData } from './components/TxModal'
 
 // Config from generated values first; env only if generated is missing.
 const CHAIN_NAME: string = generatedConfig.chainName || import.meta.env.VITE_CASPER_CHAIN_NAME || 'casper-test'
@@ -1292,6 +1294,43 @@ function App() {
   const [withdrawTx, setWithdrawTx] = useState<TxState>({ status: 'idle' })
   const [finalizeTx, setFinalizeTx] = useState<TxState>({ status: 'idle' })
 
+  // Toast notifications
+  const [toasts, setToasts] = useState<ToastData[]>([])
+
+  // Transaction modal
+  const [txModal, setTxModal] = useState<TxModalData>({
+    isOpen: false,
+    status: 'signing',
+    label: '',
+  })
+
+  // Toast helpers
+  const addToast = useCallback((toast: Omit<ToastData, 'id'>) => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    setToasts((prev) => [...prev, { ...toast, id }])
+    return id
+  }, [])
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id))
+  }, [])
+
+  const showTxToast = useCallback((
+    type: 'info' | 'success' | 'warning' | 'error',
+    title: string,
+    hash?: string,
+    message?: string
+  ) => {
+    addToast({
+      type,
+      title,
+      message,
+      hash,
+      explorerUrl: hash ? `${TESTNET_EXPLORER}/deploy/${hash}` : undefined,
+      duration: type === 'error' ? 0 : 5000,
+    })
+  }, [addToast])
+
   // Activity (persisted across sessions)
   const [activityItems, setActivityItems] = useState<ActivityItem[]>([])
   const [isRefreshingActivity, setIsRefreshingActivity] = useState(false)
@@ -1753,19 +1792,23 @@ function App() {
       if (confirmResult.success) {
         setTxState({ status: 'success', hash: deployHash })
         if (activityLabel) recordActivityFinal(deployHash, 'success')
+        showTxToast('success', `${activityLabel || 'Transaction'} Successful`, deployHash)
         // Auto-hide success after 3 seconds
         setTimeout(() => setTxState({ status: 'idle' }), 3000)
         return true
       } else {
         setTxState({ status: 'error', hash: deployHash, error: confirmResult.errorMessage || 'Execution failed' })
         if (activityLabel) recordActivityFinal(deployHash, 'error', confirmResult.errorMessage || 'Execution failed')
+        showTxToast('error', `${activityLabel || 'Transaction'} Failed`, deployHash, confirmResult.errorMessage)
         return false
       }
     } catch (err) {
-      setTxState({ status: 'error', error: err instanceof Error ? err.message : 'Unknown error' })
+      const errMsg = err instanceof Error ? err.message : 'Unknown error'
+      setTxState({ status: 'error', error: errMsg })
+      showTxToast('error', `${activityLabel || 'Transaction'} Error`, undefined, errMsg)
       return false
     }
-  }, [provider, activeKey, casperClient, recordActivityPending, recordActivityFinal])
+  }, [provider, activeKey, casperClient, recordActivityPending, recordActivityFinal, showTxToast])
 
   // Build and send payable deploy (with attached CSPR)
   const buildAndSendPayableDeploy = useCallback(async (
@@ -1842,19 +1885,23 @@ function App() {
       if (confirmResult.success) {
         setTxState({ status: 'success', hash: deployHash })
         if (activityLabel) recordActivityFinal(deployHash, 'success')
+        showTxToast('success', `${activityLabel || 'Transaction'} Successful`, deployHash)
         // Auto-hide success after 3 seconds
         setTimeout(() => setTxState({ status: 'idle' }), 3000)
         return true
       } else {
         setTxState({ status: 'error', hash: deployHash, error: confirmResult.errorMessage || 'Execution failed' })
         if (activityLabel) recordActivityFinal(deployHash, 'error', confirmResult.errorMessage || 'Execution failed')
+        showTxToast('error', `${activityLabel || 'Transaction'} Failed`, deployHash, confirmResult.errorMessage)
         return false
       }
     } catch (err) {
-      setTxState({ status: 'error', error: err instanceof Error ? err.message : 'Unknown error' })
+      const errMsg = err instanceof Error ? err.message : 'Unknown error'
+      setTxState({ status: 'error', error: errMsg })
+      showTxToast('error', `${activityLabel || 'Transaction'} Error`, undefined, errMsg)
       return false
     }
-  }, [provider, activeKey, proxyCallerWasmBytes, casperClient, recordActivityPending, recordActivityFinal])
+  }, [provider, activeKey, proxyCallerWasmBytes, casperClient, recordActivityPending, recordActivityFinal, showTxToast])
 
   // Connect wallet
   const connect = useCallback(async () => {
@@ -2886,6 +2933,15 @@ function App() {
       <footer className="footer">
         <p>Casper Testnet Only | V2 Vault Prototype</p>
       </footer>
+
+      {/* Toast notifications */}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
+      {/* Transaction modal */}
+      <TxModal
+        data={txModal}
+        onClose={() => setTxModal((prev) => ({ ...prev, isOpen: false }))}
+      />
     </div>
   )
 }
