@@ -6,7 +6,7 @@
   1) Run `cargo odra test` in `casper/magni_casper`
   2) Run `cargo odra build` once as well
   3) Commit
-- Do not modify anything outside `/casper`.
+- Do not modify anything outside `/casper` unless the ticket explicitly requires it (e.g. repo-root submission docs).
 
 ---
 
@@ -722,3 +722,253 @@
 - `pnpm --dir casper/frontend build` succeeds
 - On testnet, at least one real tx is executed up to “deposit/borrow” (withdraw finalize can be split depending on unbonding timing).
 - Commit: "feat(frontend): add V2 vault UX (deposit/borrow/repay/withdraw)"
+
+---
+
+## T21. (Hackathon Polish) Landing / Hero + clear CTA (first impression) — DONE
+
+### Goal
+- Add a judge-friendly landing experience with a single "Launch dApp" path.
+
+### To Do
+- Add a landing route (or landing section) with:
+  - 1-sentence pitch (problem → solution)
+  - 3 bullet highlights (LTV/interest/2-step withdraw)
+  - Primary CTA: "Launch dApp"
+  - Secondary CTA: "How it works"
+- Add lightweight "key metrics" cards (static + live if available):
+  - LTV max, interest APR, min deposit, withdrawal unbonding note
+- Social polish:
+  - `og:title`, `og:description`, `og:image` (basic share preview)
+
+### DoD
+- Landing is responsive and loads instantly.
+- CTA reliably enters the dApp flow.
+- Commit: `feat(frontend): add landing hero and CTAs`
+
+### Completed
+- **Commit**: `b5ea6ae` feat(frontend): add landing hero and CTAs
+- **Files**: Landing.tsx, og-image.svg, index.html, index.css, App.tsx
+
+---
+
+## T22. (Hackathon Polish) Guided onboarding (stepper + guardrails) — DONE
+
+### Goal
+- Users always know what to do next (wallet, contracts, funding, actions).
+
+### To Do
+- Add an onboarding stepper:
+  1) Install Casper Wallet (if missing)
+  2) Connect wallet
+  3) Confirm network (casper-test) + RPC health
+  4) Contracts configured
+  5) Deposit → Borrow → Repay → Withdraw (request/finalize)
+- For each disabled action, show *why* and a one-click fix (link/copy).
+- Add a "Demo mode" hint entrypoint (links to T27) without enabling it yet.
+
+### DoD
+- No "silent disabled" buttons; every disabled state explains itself.
+- Stepper auto-updates based on app state (connected/configured/vault status).
+- Commit: `feat(frontend): add guided onboarding stepper`
+
+### Completed
+- **Commit**: `2206a57` feat(frontend): add guided onboarding stepper
+- **Files**: OnboardingStepper.tsx, App.tsx, index.css
+
+---
+
+## T23. (Hackathon Polish) Unified transaction UX (toasts + modal + history) — DONE
+
+### Goal
+- Transaction flow feels professional: clear status, retry, and explorer links.
+
+### To Do
+- Introduce a global "tx manager":
+  - states: `signing → submitted → confirmed/failed`
+  - consistent error parsing (wallet cancel vs execution fail vs RPC fail)
+  - queue support (multiple txs)
+- Replace per-action inline status with:
+  - toast notifications (non-blocking)
+  - optional "tx details" modal/drawer with:
+    - deploy hash copy
+    - open in `cspr.live`
+    - raw error text + suggested next action
+- Integrate with existing Activity list (persisted history):
+  - ensure every tx records a user-friendly label + final status
+
+### DoD
+- All write actions use the shared tx manager.
+- A user can always find the deploy hash and open it in the explorer.
+- Commit: `feat(frontend): add global transaction UX (toasts + modal)`
+
+### Completed
+- **Commit**: `b57e6e4` feat(frontend): unified transaction UX with toasts
+- **Files**: Toast.tsx, TxModal.tsx, App.tsx, index.css
+
+---
+
+## T24. (Hackathon Polish) Loading / empty / error states pass (skeletons + retry) — DONE
+
+### Goal
+- No jank: loading feels intentional, empty states are helpful, errors are recoverable.
+
+### To Do
+- Add skeleton UI for:
+  - balances
+  - vault position
+  - activity list
+- Add "empty state" components with copy + next action (e.g. "Deposit to create a vault").
+- Add error boundary + friendly error screen:
+  - "Retry" button
+  - "Reset app state" (optional)
+  - show minimal diagnostics in a collapsible area
+
+### DoD
+- No raw stack traces in the UI.
+- The app has a consistent skeleton/empty pattern across sections.
+- Commit: `feat(frontend): improve loading and error states`
+
+### Completed
+- **Commit**: `4ce68ad` feat(frontend): add skeletons, empty states, and error boundary
+- **Files**: Skeleton.tsx, EmptyState.tsx, ErrorBoundary.tsx, App.tsx, main.tsx, index.css
+
+---
+
+## T25. (Hackathon Polish) UI component extraction + consistency pass (reduce App.tsx) — DONE
+
+### Goal
+- Make the UI easier to iterate on (and more consistent) while staying fast.
+
+### To Do
+- Extract reusable components:
+  - `Button`, `Card`, `Badge`, `Input`, `StatRow`, `Toast`, `Modal`
+- Remove inline styles where practical; keep design tokens in CSS variables.
+- Add subtle motion:
+  - hover/press states
+  - page/section transitions (respect `prefers-reduced-motion`)
+
+### DoD
+- `casper/frontend/src/App.tsx` is meaningfully smaller and mostly orchestration.
+- Visual spacing/typography is consistent across the app.
+- Commit: `refactor(frontend): extract UI components and polish layout`
+
+### Completed
+- **Commit**: `7733cd6` feat(frontend): extract UI components and add consistency pass
+- **Files**: components/ui/Button.tsx, Card.tsx, Input.tsx, Badge.tsx, index.ts, index.css
+
+---
+
+## T26. (Hackathon Polish) Theme toggle (dark/light) + persistence — DONE
+
+### Goal
+- Let judges switch themes; maintain readability and contrast.
+
+### To Do
+- Add light theme tokens (CSS variables).
+- Add a theme toggle in the header:
+  - default respects `prefers-color-scheme`
+  - persists to `localStorage`
+- Ensure interactive states are visible in both themes.
+
+### DoD
+- Both themes are readable; no "invisible borders/text".
+- Commit: `feat(frontend): add dark/light theme toggle`
+
+### Completed
+- **Commit**: `6d15858` feat(frontend): add dark/light theme toggle with persistence
+- **Files**: ThemeToggle.tsx, App.tsx, index.css
+
+---
+
+## T27. (Hackathon Polish) Demo mode (no wallet required) — DONE
+
+### Goal
+- Allow a full UI walkthrough without Casper Wallet or testnet funds.
+
+### To Do
+- Add a "Demo mode" toggle:
+  - uses mocked wallet + mocked contract reads
+  - disables signing/sending txs
+  - shows pre-baked example deploy hashes + activity
+- Add a visible "DEMO MODE" banner + reset button.
+
+### DoD
+- Demo mode works with zero external dependencies (no wallet, no RPC).
+- Switching demo mode on/off is safe and clearly communicated.
+- Commit: `feat(frontend): add demo mode with mocked state`
+
+### Completed
+- **Commit**: `6058b30` feat(frontend): add demo mode with mocked data
+- **Files**: useDemo.ts, DemoBanner.tsx, OnboardingStepper.tsx, App.tsx, index.css
+
+---
+
+## T28. (Hackathon Polish) Dashboard + charts (KPIs + history) — DONE
+
+### Goal
+- Make the product feel "real": show KPIs and visual history.
+
+### To Do
+- Add KPI cards:
+  - collateral, debt, LTV, interest APR, vault status, pending withdraw
+- Add a simple chart:
+  - time-series from local snapshots (store periodic reads in `localStorage`)
+  - or activity-derived state transitions
+- Ensure it works both in live mode and demo mode.
+
+### DoD
+- Chart renders and updates from real state (and demo state).
+- No major layout shifts; responsive on laptop + mobile.
+- Commit: `feat(frontend): add dashboard KPIs and charts`
+
+### Completed
+- **Commit**: `390ef3c` feat(frontend): add dashboard with KPIs and charts
+- **Files**: Dashboard.tsx, App.tsx, index.css
+
+---
+
+## T29. (Hackathon Polish) "How it works" page (explainers + constraints) — DONE
+
+### Goal
+- Judges understand the protocol in <60 seconds.
+
+### To Do
+- Add a "How it works" page/section:
+  - vault flow diagram (deposit → delegate → borrow)
+  - withdraw: request/finalize + unbonding explanation
+  - risks/constraints: LTV, liquidation policy (if any), testnet notes
+- Include 2–3 simple diagrams/images (SVG/PNG) in-repo.
+
+### DoD
+- Page is linked from landing and within the dApp.
+- Copy is concise and skimmable.
+- Commit: `docs: add how-it-works explainer`
+
+### Completed
+- **Commit**: `4a0657d` feat(frontend): add How It Works page with diagrams
+- **Files**: HowItWorks.tsx, App.tsx, index.css
+
+---
+
+## T30. (Hackathon Polish) Submission pack (README + demo script + assets) — DONE
+
+### Goal
+- Reproducible, judge-friendly submission materials.
+
+### To Do
+- Update root docs:
+  - add 30-second pitch, screenshots/GIF, and architecture diagram
+  - add "Demo script" (exact click path + expected timings)
+  - add troubleshooting (wallet install, RPC, contracts not wired)
+- Add `SUBMISSION.md` at repo root:
+  - 3-minute live demo script
+  - fallback plan using Demo mode (T27)
+
+### DoD
+- A new reviewer can run the demo from scratch without extra context.
+- Commit: `docs: add hackathon submission pack`
+
+### Completed
+- **Commit**: `84886a5` docs: add submission pack for hackathon
+- **Files**: README.md, SUBMISSION.md
