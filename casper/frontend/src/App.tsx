@@ -14,6 +14,8 @@ import Landing from './components/Landing'
 import OnboardingStepper from './components/OnboardingStepper'
 import { ToastContainer, ToastData } from './components/Toast'
 import TxModal, { TxModalData } from './components/TxModal'
+import { NoActivityState, NoVaultState } from './components/EmptyState'
+import { SkeletonVaultSummary, SkeletonActivityList, SkeletonBalanceRow } from './components/Skeleton'
 
 // Config from generated values first; env only if generated is missing.
 const CHAIN_NAME: string = generatedConfig.chainName || import.meta.env.VITE_CASPER_CHAIN_NAME || 'casper-test'
@@ -2319,10 +2321,10 @@ function App() {
                     </div>
                   )}
                 </div>
+              ) : isLoadingVault ? (
+                <SkeletonVaultSummary />
               ) : (
-                <div className="no-position">
-                  <p>No vault. Deposit CSPR to create one.</p>
-                </div>
+                <NoVaultState onDeposit={() => setActivePage('deposit')} />
               )}
             </div>
 
@@ -2342,8 +2344,10 @@ function App() {
 
               {!isConnected ? (
                 <p className="no-position">Connect your wallet to see activity.</p>
+              ) : isRefreshingActivity && activityItems.length === 0 ? (
+                <SkeletonActivityList count={3} />
               ) : activityItems.length === 0 ? (
-                <p className="no-position">No transactions yet.</p>
+                <NoActivityState />
               ) : (
                 <div className="tx-list">
                   {activityItems.map((item) => (
