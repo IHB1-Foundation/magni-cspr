@@ -26,6 +26,7 @@ interface OnboardingStepperProps {
   onConnect: () => void
   onInstallWallet: () => void
   onDeposit: () => void
+  onEnableDemo?: () => void
 }
 
 const OnboardingStepper: FC<OnboardingStepperProps> = ({
@@ -39,6 +40,7 @@ const OnboardingStepper: FC<OnboardingStepperProps> = ({
   onConnect,
   onInstallWallet,
   onDeposit,
+  onEnableDemo,
 }) => {
   const getStepStatus = (stepCondition: boolean, prevComplete: boolean): StepStatus => {
     if (stepCondition) return 'complete'
@@ -197,7 +199,12 @@ const OnboardingStepper: FC<OnboardingStepperProps> = ({
 
       <div className="stepper-demo-hint">
         <span>No wallet? Try </span>
-        <button type="button" className="stepper-demo-link" disabled title="Coming soon in Demo Mode (T27)">
+        <button
+          type="button"
+          className="stepper-demo-link"
+          onClick={onEnableDemo}
+          disabled={!onEnableDemo}
+        >
           Demo Mode
         </button>
       </div>

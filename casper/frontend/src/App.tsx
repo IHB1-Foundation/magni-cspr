@@ -17,6 +17,8 @@ import TxModal, { TxModalData } from './components/TxModal'
 import { NoActivityState, NoVaultState } from './components/EmptyState'
 import { SkeletonVaultSummary, SkeletonActivityList, SkeletonBalanceRow } from './components/Skeleton'
 import ThemeToggle from './components/ThemeToggle'
+import DemoBanner from './components/DemoBanner'
+import useDemo, { DEMO_DATA } from './hooks/useDemo'
 
 // Config from generated values first; env only if generated is missing.
 const CHAIN_NAME: string = generatedConfig.chainName || import.meta.env.VITE_CASPER_CHAIN_NAME || 'casper-test'
@@ -1257,6 +1259,19 @@ function App() {
     return 'deposit'
   })
 
+  // Demo mode
+  const { isDemoMode, enableDemo, disableDemo } = useDemo()
+
+  // Apply body class for demo mode
+  useEffect(() => {
+    if (isDemoMode) {
+      document.body.classList.add('demo-mode')
+    } else {
+      document.body.classList.remove('demo-mode')
+    }
+    return () => document.body.classList.remove('demo-mode')
+  }, [isDemoMode])
+
   // Wallet state
   const [provider, setProvider] = useState<CasperWalletProvider | null>(null)
   const [casperClient] = useState(() => new CasperClient(NODE_URL))
@@ -2168,7 +2183,22 @@ function App() {
   // Landing page is full-width, no sidebar
   const isLandingPage = activePage === 'landing'
 
+  // In demo mode, use mocked values
+  const displayIsConnected = isDemoMode || isConnected
+  const displayActiveKey = isDemoMode ? DEMO_DATA.activeKey : activeKey
+  const displayCsprTotalMotes = isDemoMode ? DEMO_DATA.csprTotalMotes : csprTotalMotes
+  const displayCsprAvailableMotes = isDemoMode ? DEMO_DATA.csprAvailableMotes : csprAvailableMotes
+  const displayCsprHeldMotes = isDemoMode ? DEMO_DATA.csprHeldMotes : csprHeldMotes
+  const displayCollateralMotes = isDemoMode ? DEMO_DATA.collateralMotes : collateralMotes
+  const displayDebtWad = isDemoMode ? DEMO_DATA.debtWad : debtWad
+  const displayMCSPRBalance = isDemoMode ? DEMO_DATA.mCSPRBalance : mCSPRBalance
+  const displayLtvBps = isDemoMode ? DEMO_DATA.ltvBps : ltvBps
+  const displayVaultStatus = isDemoMode ? VaultStatus.Active : vaultStatus
+  const displayActivityItems = isDemoMode ? DEMO_DATA.activityItems : activityItems
+
   return (
+    <>
+      {isDemoMode && <DemoBanner onExit={disableDemo} />}
     <div className="app">
       <header className="header">
         <div className="brand" style={{ cursor: 'pointer' }} onClick={() => setActivePage('landing')}>
@@ -2841,7 +2871,7 @@ function App() {
             )}
           </div>
 
-          {activePage === 'deposit' && (
+          {activePage === 'deposit' && !isDemoMode && (
             <OnboardingStepper
               hasWallet={Boolean(provider)}
               isConnected={isConnected}
@@ -2857,6 +2887,7 @@ function App() {
                 const depositSection = document.querySelector('.card h2')
                 if (depositSection) depositSection.scrollIntoView({ behavior: 'smooth' })
               }}
+              onEnableDemo={enableDemo}
             />
           )}
 
@@ -2949,6 +2980,7 @@ function App() {
         onClose={() => setTxModal((prev) => ({ ...prev, isOpen: false }))}
       />
     </div>
+    </>
   )
 }
 

@@ -2032,3 +2032,60 @@ body {
 [data-theme="light"] .input-field:focus {
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
 }
+
+/* ===== Demo Mode ===== */
+
+.demo-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1.5rem;
+  background: linear-gradient(135deg, #8b5cf6, #6366f1);
+  color: #ffffff;
+  font-size: 0.875rem;
+}
+
+.demo-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.demo-banner-icon {
+  font-size: 1.25rem;
+}
+
+.demo-banner-text strong {
+  font-weight: 600;
+}
+
+.demo-banner-exit {
+  padding: 0.4rem 0.75rem;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  color: #ffffff;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.demo-banner-exit:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Add top padding when demo banner is shown */
+body.demo-mode {
+  padding-top: 3rem;
+}
+
+.demo-mode .app {
+  margin-top: 1rem;
+}
