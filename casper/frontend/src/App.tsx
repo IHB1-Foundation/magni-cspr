@@ -16,6 +16,7 @@ import { ToastContainer, ToastData } from './components/Toast'
 import TxModal, { TxModalData } from './components/TxModal'
 import { NoActivityState, NoVaultState } from './components/EmptyState'
 import { SkeletonVaultSummary, SkeletonActivityList, SkeletonBalanceRow } from './components/Skeleton'
+import ThemeToggle from './components/ThemeToggle'
 
 // Config from generated values first; env only if generated is missing.
 const CHAIN_NAME: string = generatedConfig.chainName || import.meta.env.VITE_CASPER_CHAIN_NAME || 'casper-test'
@@ -2197,6 +2198,7 @@ function App() {
             >
               How It Works
             </button>
+            <ThemeToggle />
           </nav>
         )}
       </header>

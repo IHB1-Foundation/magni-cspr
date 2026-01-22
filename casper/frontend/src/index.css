@@ -4,7 +4,9 @@
   box-sizing: border-box;
 }
 
-:root {
+/* Dark theme (default) */
+:root,
+[data-theme="dark"] {
   --bg: #010101;
   --surface: rgba(255, 255, 255, 0.08);
   --surface-2: rgba(255, 255, 255, 0.12);
@@ -24,6 +26,33 @@
   --info: #60a5fa;
   --warning: #fbbf24;
   --error: #ef4444;
+
+  color-scheme: dark;
+}
+
+/* Light theme */
+[data-theme="light"] {
+  --bg: #fafafa;
+  --surface: rgba(0, 0, 0, 0.04);
+  --surface-2: rgba(0, 0, 0, 0.06);
+  --surface-3: rgba(0, 0, 0, 0.08);
+  --border: rgba(0, 0, 0, 0.1);
+
+  --primary: #111111;
+  --primary-hover: #222222;
+  --primary-fg: #ffffff;
+  --secondary: rgba(0, 0, 0, 0.08);
+  --secondary-hover: rgba(0, 0, 0, 0.12);
+
+  --text: #111111;
+  --text-muted: rgba(0, 0, 0, 0.6);
+  --ring: rgba(0, 0, 0, 0.2);
+  --success: #16a34a;
+  --info: #2563eb;
+  --warning: #d97706;
+  --error: #dc2626;
+
+  color-scheme: light;
 }
 
 body {
@@ -1951,3 +1980,55 @@ body {
 .text-muted { color: var(--text-muted); }
 .font-semibold { font-weight: 600; }
 .font-mono { font-family: ui-monospace, monospace; }
+
+/* ===== Theme Toggle ===== */
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.theme-toggle:hover {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.theme-toggle-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.theme-toggle-label {
+  font-weight: 500;
+}
+
+/* Light theme specific overrides */
+[data-theme="light"] .card {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .toast {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="light"] .modal {
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.16);
+}
+
+[data-theme="light"] .input-field:focus {
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+}
