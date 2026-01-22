@@ -1,4 +1,59 @@
-# Magni Protocol (Casper)
+# Magni Protocol
+
+**Unlock your staked CSPR.**
+
+Magni is a collateral-debt vault protocol on Casper Network. Deposit CSPR, earn staking rewards, and borrow against your collateral - all without selling your position.
+
+![Magni Screenshot](casper/frontend/public/og-image.svg)
+
+## 30-Second Pitch
+
+> **Problem:** CSPR holders want to use DeFi without selling their stake.
+>
+> **Solution:** Magni lets you deposit CSPR (auto-delegated to validators for staking rewards) and borrow mCSPR stablecoin at up to 80% LTV with just 2% APR. When you need your CSPR back, repay and withdraw in two clicks.
+>
+> **Result:** Keep earning staking rewards while unlocking liquidity.
+
+## Key Features
+
+- **Stake & Borrow**: Deposit CSPR, earn staking rewards, borrow mCSPR
+- **80% LTV**: Borrow up to 80% of your collateral value
+- **2% APR**: Low-cost borrowing with simple interest
+- **2-Step Withdraw**: Respects Casper's unbonding period (~14h testnet / ~14 days mainnet)
+- **Demo Mode**: Try the full UX without a wallet
+- **Dark/Light Theme**: Your preference, persisted
+
+## Architecture
+
+```
++------------------+       +------------------+       +------------------+
+|      User        |       |      Magni       |       |    Validator     |
+|   (Casper Wallet)|       |     Contract     |       |    (Staking)     |
++--------+---------+       +--------+---------+       +--------+---------+
+         |                          |                          |
+         |  1. deposit(CSPR)        |                          |
+         |------------------------->|                          |
+         |                          |  2. delegate()           |
+         |                          |------------------------->|
+         |                          |                          |
+         |  3. borrow(mCSPR)        |                          |
+         |<-------------------------|                          |
+         |                          |                          |
+         |  4. repay(mCSPR)         |                          |
+         |------------------------->|                          |
+         |                          |                          |
+         |  5. request_withdraw()   |                          |
+         |------------------------->|  6. undelegate()         |
+         |                          |------------------------->|
+         |                          |                          |
+         |  7. finalize_withdraw()  |   (after unbonding)      |
+         |------------------------->|                          |
+         |<-------------------------|                          |
+         |       CSPR returned      |                          |
++--------+---------+       +--------+---------+       +--------+---------+
+```
+
+---
 
 Magni V2 is a **CSPR vault** on Casper Network:
 - Users deposit native CSPR as collateral.
