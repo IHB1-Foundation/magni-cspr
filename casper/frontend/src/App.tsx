@@ -10,6 +10,7 @@ import { Buffer } from 'buffer'
 import { blake2b } from 'blakejs'
 import { generatedConfig } from './config/contracts.generated'
 import proxyCallerWasmUrl from './assets/proxy_caller_with_return.wasm?url'
+import Landing from './components/Landing'
 
 // Config from generated values first; env only if generated is missing.
 const CHAIN_NAME: string = generatedConfig.chainName || import.meta.env.VITE_CASPER_CHAIN_NAME || 'casper-test'
@@ -1239,10 +1240,14 @@ async function fetchVaultStateFromEvents(
 
 // ============ End Contract Event Fetching ============
 
+type PageType = 'landing' | 'deposit' | 'portfolio' | 'howItWorks'
+
 function App() {
-  const [activePage, setActivePage] = useState<'deposit' | 'portfolio'>(() => {
+  const [activePage, setActivePage] = useState<PageType>(() => {
     const hash = window.location.hash.replace('#', '')
-    if (hash === 'portfolio' || hash === 'deposit') return hash
+    if (hash === 'portfolio' || hash === 'deposit' || hash === 'howItWorks') return hash as PageType
+    // Show landing for first-time visitors (no hash)
+    if (!hash) return 'landing'
     return 'deposit'
   })
 
@@ -1541,8 +1546,8 @@ function App() {
   useEffect(() => {
     const onHashChange = () => {
       const hash = window.location.hash.replace('#', '')
-      if (hash === 'portfolio' || hash === 'deposit') {
-        setActivePage(hash)
+      if (hash === 'portfolio' || hash === 'deposit' || hash === 'howItWorks' || hash === 'landing') {
+        setActivePage(hash as PageType)
       } else if (hash) {
         // Unknown route (e.g. old #swap) -> send user to deposit.
         setActivePage('deposit')
@@ -1553,7 +1558,12 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (window.location.hash !== `#${activePage}`) {
+    // Don't set hash for landing to keep URL clean
+    if (activePage === 'landing') {
+      if (window.location.hash) {
+        window.history.replaceState(null, '', window.location.pathname)
+      }
+    } else if (window.location.hash !== `#${activePage}`) {
       window.location.hash = `#${activePage}`
     }
   }, [activePage])
@@ -2104,33 +2114,65 @@ function App() {
     withdrawTx.status === 'pending' || withdrawTx.status === 'signing' ||
     finalizeTx.status === 'pending' || finalizeTx.status === 'signing'
 
+  // Landing page is full-width, no sidebar
+  const isLandingPage = activePage === 'landing'
+
   return (
     <div className="app">
       <header className="header">
-        <div className="brand">
+        <div className="brand" style={{ cursor: 'pointer' }} onClick={() => setActivePage('landing')}>
           <h1>Magni</h1>
           <span className="network-badge">{NETWORK_LABEL}</span>
         </div>
-        <nav className="top-nav" aria-label="Primary">
-          <button
-            type="button"
-            className={`nav-link ${activePage === 'deposit' ? 'active' : ''}`}
-            onClick={() => setActivePage('deposit')}
-          >
-            Deposit
-          </button>
-          <button
-            type="button"
-            className={`nav-link ${activePage === 'portfolio' ? 'active' : ''}`}
-            onClick={() => setActivePage('portfolio')}
-          >
-            Portfolio
-          </button>
-        </nav>
+        {!isLandingPage && (
+          <nav className="top-nav" aria-label="Primary">
+            <button
+              type="button"
+              className={`nav-link ${activePage === 'deposit' ? 'active' : ''}`}
+              onClick={() => setActivePage('deposit')}
+            >
+              Deposit
+            </button>
+            <button
+              type="button"
+              className={`nav-link ${activePage === 'portfolio' ? 'active' : ''}`}
+              onClick={() => setActivePage('portfolio')}
+            >
+              Portfolio
+            </button>
+            <button
+              type="button"
+              className={`nav-link ${activePage === 'howItWorks' ? 'active' : ''}`}
+              onClick={() => setActivePage('howItWorks')}
+            >
+              How It Works
+            </button>
+          </nav>
+        )}
       </header>
 
+      {isLandingPage ? (
+        <Landing
+          onLaunchApp={() => setActivePage('deposit')}
+          onHowItWorks={() => setActivePage('howItWorks')}
+        />
+      ) : (
       <main className="main">
-        {activePage === 'portfolio' ? (
+        {activePage === 'howItWorks' ? (
+          <section className="main-left" style={{ gridColumn: '1 / -1' }}>
+            <div className="card">
+              <h2>How It Works</h2>
+              <p>Full explanation coming in T29. For now, use the deposit flow to get started.</p>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setActivePage('deposit')}
+              >
+                Go to Deposit
+              </button>
+            </div>
+          </section>
+        ) : activePage === 'portfolio' ? (
           <section className="main-left">
             <div className="card">
               <h2>Portfolio</h2>
@@ -2789,6 +2831,7 @@ function App() {
           </div>
         </aside>
       </main>
+      )}
 
       <footer className="footer">
         <p>Casper Testnet Only | V2 Vault Prototype</p>

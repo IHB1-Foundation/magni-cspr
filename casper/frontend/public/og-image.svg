@@ -1,0 +1,41 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="630" fill="#010101"/>
+  <rect x="0" y="0" width="1200" height="630" fill="url(#gradient)" opacity="0.3"/>
+  <defs>
+    <linearGradient id="gradient" x1="0" y1="0" x2="1200" y2="630">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Logo / Brand -->
+  <text x="100" y="200" font-family="system-ui, -apple-system, sans-serif" font-size="72" font-weight="700" fill="white">Magni</text>
+
+  <!-- Tagline -->
+  <text x="100" y="280" font-family="system-ui, -apple-system, sans-serif" font-size="32" fill="rgba(255,255,255,0.8)">Unlock Your Staked CSPR</text>
+
+  <!-- Description -->
+  <text x="100" y="350" font-family="system-ui, -apple-system, sans-serif" font-size="24" fill="rgba(255,255,255,0.6)">Deposit • Stake • Borrow</text>
+
+  <!-- Metrics boxes -->
+  <rect x="100" y="420" width="200" height="100" rx="12" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+  <text x="200" y="465" font-family="system-ui, sans-serif" font-size="28" font-weight="700" fill="white" text-anchor="middle">80%</text>
+  <text x="200" y="495" font-family="system-ui, sans-serif" font-size="14" fill="rgba(255,255,255,0.6)" text-anchor="middle">Max LTV</text>
+
+  <rect x="320" y="420" width="200" height="100" rx="12" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+  <text x="420" y="465" font-family="system-ui, sans-serif" font-size="28" font-weight="700" fill="white" text-anchor="middle">2%</text>
+  <text x="420" y="495" font-family="system-ui, sans-serif" font-size="14" fill="rgba(255,255,255,0.6)" text-anchor="middle">APR Interest</text>
+
+  <rect x="540" y="420" width="200" height="100" rx="12" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+  <text x="640" y="465" font-family="system-ui, sans-serif" font-size="28" font-weight="700" fill="white" text-anchor="middle">500</text>
+  <text x="640" y="495" font-family="system-ui, sans-serif" font-size="14" fill="rgba(255,255,255,0.6)" text-anchor="middle">Min CSPR</text>
+
+  <!-- Casper badge -->
+  <rect x="100" y="550" width="180" height="40" rx="20" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+  <text x="190" y="577" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="rgba(255,255,255,0.9)" text-anchor="middle">Casper Network</text>
+
+  <!-- Decorative elements -->
+  <circle cx="1050" cy="315" r="200" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="2"/>
+  <circle cx="1050" cy="315" r="150" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="2"/>
+  <circle cx="1050" cy="315" r="100" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="2"/>
+</svg>
