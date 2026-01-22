@@ -11,6 +11,7 @@ import { blake2b } from 'blakejs'
 import { generatedConfig } from './config/contracts.generated'
 import proxyCallerWasmUrl from './assets/proxy_caller_with_return.wasm?url'
 import Landing from './components/Landing'
+import OnboardingStepper from './components/OnboardingStepper'
 
 // Config from generated values first; env only if generated is missing.
 const CHAIN_NAME: string = generatedConfig.chainName || import.meta.env.VITE_CASPER_CHAIN_NAME || 'casper-test'
@@ -2431,6 +2432,24 @@ function App() {
               >
                 Deposit {depositAmount || '0'} CSPR
               </button>
+              {!isConnected && (
+                <div className="guardrail-hint">
+                  <span className="guardrail-hint-icon">!</span>
+                  <span>Connect your wallet to deposit CSPR</span>
+                </div>
+              )}
+              {isConnected && !contractsConfigured && (
+                <div className="guardrail-hint">
+                  <span className="guardrail-hint-icon">!</span>
+                  <span>Contracts not configured. Check contracts.generated.ts</span>
+                </div>
+              )}
+              {isConnected && contractsConfigured && !proxyCallerWasmBytes && (
+                <div className="guardrail-hint">
+                  <span className="guardrail-hint-icon">!</span>
+                  <span>Loading proxy caller... please wait</span>
+                </div>
+              )}
               {renderTxStatus(depositTx, 'Deposit')}
             </div>
 
@@ -2468,6 +2487,18 @@ function App() {
               >
                 Borrow {borrowAmount || '0'} mCSPR
               </button>
+              {isConnected && contractsConfigured && vaultStatus === VaultStatus.None && (
+                <div className="guardrail-hint">
+                  <span className="guardrail-hint-icon">!</span>
+                  <span>Deposit CSPR first to create a vault before borrowing</span>
+                </div>
+              )}
+              {isConnected && contractsConfigured && vaultStatus === VaultStatus.Withdrawing && (
+                <div className="guardrail-hint">
+                  <span className="guardrail-hint-icon">!</span>
+                  <span>Cannot borrow while withdrawal is pending. Finalize first.</span>
+                </div>
+              )}
               {renderTxStatus(borrowTx, 'Borrow')}
             </div>
 
@@ -2757,7 +2788,26 @@ function App() {
             )}
           </div>
 
-          {activePage !== 'portfolio' && (
+          {activePage === 'deposit' && (
+            <OnboardingStepper
+              hasWallet={Boolean(provider)}
+              isConnected={isConnected}
+              networkMatch={!rpcChainspecName || rpcChainspecName === CHAIN_NAME}
+              contractsConfigured={contractsConfigured}
+              hasVault={vaultStatus !== VaultStatus.None}
+              hasDebt={debtWad > 0n}
+              isPendingWithdraw={vaultStatus === VaultStatus.Withdrawing}
+              onConnect={connect}
+              onInstallWallet={() => window.open('https://www.casperwallet.io/', '_blank')}
+              onDeposit={() => {
+                // Scroll to deposit section
+                const depositSection = document.querySelector('.card h2')
+                if (depositSection) depositSection.scrollIntoView({ behavior: 'smooth' })
+              }}
+            />
+          )}
+
+          {activePage !== 'portfolio' && activePage !== 'howItWorks' && (
             <div className={`card ${vaultStatus !== VaultStatus.None ? 'connected' : ''}`}>
               <h2>Vault</h2>
 

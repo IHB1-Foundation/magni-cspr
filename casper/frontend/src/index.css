@@ -992,3 +992,188 @@ body {
   line-height: 1.5;
   margin: 0;
 }
+
+/* ===== Onboarding Stepper ===== */
+
+.onboarding-stepper {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1.25rem;
+}
+
+.stepper-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.stepper-header h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.stepper-progress-text {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.stepper-progress-bar {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.stepper-progress-fill {
+  height: 100%;
+  background: var(--success);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stepper-progress-fill {
+    transition: none;
+  }
+}
+
+.stepper-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.stepper-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.5rem;
+  border-radius: 8px;
+  transition: background-color 0.15s;
+}
+
+.stepper-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.stepper-indicator {
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.stepper-item--complete .stepper-indicator {
+  background: var(--success);
+  color: #000;
+}
+
+.stepper-item--current .stepper-indicator {
+  background: var(--primary);
+  color: var(--primary-fg);
+}
+
+.stepper-item--pending .stepper-indicator,
+.stepper-item--blocked .stepper-indicator {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+}
+
+.stepper-check {
+  font-size: 0.875rem;
+}
+
+.stepper-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.stepper-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.stepper-item--pending .stepper-label,
+.stepper-item--blocked .stepper-label {
+  color: var(--text-muted);
+}
+
+.stepper-description {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.125rem;
+  line-height: 1.4;
+}
+
+.stepper-hint {
+  font-size: 0.7rem;
+  color: var(--warning);
+  margin-top: 0.25rem;
+}
+
+.stepper-action {
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.75rem;
+}
+
+.stepper-demo-hint {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.stepper-demo-link {
+  background: none;
+  border: none;
+  color: var(--info);
+  cursor: pointer;
+  font-size: 0.75rem;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.stepper-demo-link:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
+/* Guardrail: Disabled action explanation */
+.guardrail-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  border-radius: 8px;
+  font-size: 0.8rem;
+  color: var(--warning);
+  margin-top: 0.5rem;
+}
+
+.guardrail-hint-icon {
+  flex-shrink: 0;
+}
+
+.guardrail-hint a {
+  color: var(--warning);
+  text-decoration: underline;
+}
