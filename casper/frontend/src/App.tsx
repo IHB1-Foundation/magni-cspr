@@ -21,6 +21,15 @@ import DemoBanner from './components/DemoBanner'
 import useDemo, { DEMO_DATA } from './hooks/useDemo'
 import Dashboard from './components/Dashboard'
 import HowItWorks from './components/HowItWorks'
+import {
+  ONE_CSPR,
+  formatCSPR,
+  formatWad,
+  parseCSPR,
+  normalizeDecimalInput,
+  csprToWad,
+  wadToMotes,
+} from './utils/amounts'
 
 // Config from generated values first; env only if generated is missing.
 const CHAIN_NAME: string = generatedConfig.chainName || import.meta.env.VITE_CASPER_CHAIN_NAME || 'casper-test'
@@ -45,11 +54,6 @@ const NETWORK_LABEL =
     : /test/i.test(CHAIN_NAME)
       ? 'Testnet'
       : CHAIN_NAME
-const MOTES_DECIMALS = 9
-const WAD_DECIMALS = 18
-const ONE_CSPR = BigInt(10) ** BigInt(MOTES_DECIMALS) // 1e9 motes
-const ONE_WAD = BigInt(10) ** BigInt(WAD_DECIMALS)     // 1e18 wad
-const MOTES_TO_WAD = BigInt(10) ** BigInt(9)           // conversion factor
 const PAYMENT_AMOUNT = '5000000000' // 5 CSPR for simple contract calls
 const PAYABLE_PAYMENT_AMOUNT = '50000000000' // 50 CSPR for payable calls (proxy caller wasm needs more gas)
 const REQUESTS_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes (Casper Wallet provider request timeout)
@@ -135,57 +139,6 @@ console.log('[STARTUP] Contract Configuration:')
 console.log('[STARTUP] MAGNI_HASH from config:', MAGNI_HASH)
 console.log('[STARTUP] MCSPR_HASH from config:', MCSPR_HASH)
 console.log('='.repeat(60))
-
-// Format utils
-function formatCSPR(motes: bigint): string {
-  const whole = motes / ONE_CSPR
-  const frac = motes % ONE_CSPR
-  const fracStr = frac.toString().padStart(MOTES_DECIMALS, '0').slice(0, 4)
-  return `${whole}.${fracStr}`
-}
-
-function formatWad(wad: bigint): string {
-  const whole = wad / ONE_WAD
-  const frac = wad % ONE_WAD
-  const fracStr = frac.toString().padStart(WAD_DECIMALS, '0').slice(0, 4)
-  return `${whole}.${fracStr}`
-}
-
-const DECIMAL_INPUT_REGEX = /^\d*(?:\.\d*)?$/
-
-function normalizeDecimalInput(input: string): string {
-  const trimmed = input.trim()
-  if (trimmed === '') return ''
-  let cleaned = trimmed.replace(/[^\d.]/g, '')
-  const firstDot = cleaned.indexOf('.')
-  if (firstDot !== -1) {
-    cleaned = cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, '')
-  }
-  if (cleaned.startsWith('.')) return `0${cleaned}`
-  return cleaned
-}
-
-function parseCSPR(input: string): bigint {
-  const normalized = input.trim()
-  if (normalized === '') return 0n
-  if (!DECIMAL_INPUT_REGEX.test(normalized)) return 0n
-  const parts = normalized.split('.')
-  const whole = parts[0] ? BigInt(parts[0]) : 0n
-  let frac = BigInt(0)
-  if (parts[1] && parts[1].length > 0) {
-    const fracPart = parts[1].slice(0, MOTES_DECIMALS).padEnd(MOTES_DECIMALS, '0')
-    if (fracPart) frac = BigInt(fracPart)
-  }
-  return whole * ONE_CSPR + frac
-}
-
-function csprToWad(motes: bigint): bigint {
-  return motes * MOTES_TO_WAD
-}
-
-function wadToMotes(wad: bigint): bigint {
-  return wad / MOTES_TO_WAD
-}
 
 function truncateHash(hash: string): string {
   return `${hash.slice(0, 10)}...${hash.slice(-8)}`
