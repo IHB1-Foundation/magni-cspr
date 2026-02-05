@@ -1385,6 +1385,35 @@ function App() {
   const maxWithdrawWad = collateralWad > minCollateralWad ? collateralWad - minCollateralWad : 0n
   const maxWithdrawMotes = wadToMotes(maxWithdrawWad)
 
+  const depositMotes = parseCSPR(depositAmount)
+  const borrowMotes = parseCSPR(borrowAmount)
+  const repayMotes = parseCSPR(repayAmount || '0')
+  const withdrawMotes = parseCSPR(withdrawAmount)
+
+  const borrowWad = csprToWad(borrowMotes)
+  const repayWad = csprToWad(repayMotes)
+
+  const depositError =
+    isConnected && depositMotes > 0n && depositMotes > csprAvailableMotes
+      ? 'Amount exceeds available balance'
+      : null
+  const borrowError =
+    borrowMotes > 0n && borrowWad > availableToBorrow
+      ? 'Amount exceeds max borrow'
+      : null
+  const repayError =
+    repayMotes > 0n && repayWad > mCSPRBalance
+      ? 'Amount exceeds mCSPR balance'
+      : null
+  const repayHint =
+    repayMotes > 0n && repayWad > debtWad
+      ? 'Amount will be capped to current debt'
+      : null
+  const withdrawError =
+    withdrawMotes > 0n && withdrawMotes > maxWithdrawMotes
+      ? 'Amount exceeds max withdraw'
+      : null
+
   // Loading state for vault refresh
   const [isLoadingVault, setIsLoadingVault] = useState(false)
 
@@ -2499,13 +2528,14 @@ function App() {
               <p>Deposit native CSPR as collateral. Your CSPR will be delegated to validators for staking rewards.</p>
               <p style={{ fontSize: '0.9em', color: '#888' }}>Minimum deposit: {MIN_DEPOSIT_CSPR.toString()} CSPR (required for delegation)</p>
               <div className="input-group">
-                <div className="input-row">
+                <div className={`input-row${depositError ? ' input-error' : ''}`}>
                   <input
                     type="text"
                     value={depositAmount}
                     onChange={(e) => setDepositAmount(normalizeDecimalInput(e.target.value))}
                     placeholder={`Min ${MIN_DEPOSIT_CSPR.toString()} CSPR`}
                     disabled={!isConnected || !contractsConfigured || !proxyCallerWasmBytes || isAnyTxPending}
+                    aria-invalid={Boolean(depositError)}
                   />
                   <button
                     type="button"
@@ -2518,20 +2548,21 @@ function App() {
                   </button>
                   <span className="input-unit">CSPR</span>
                 </div>
+                {depositError && <div className="input-error-text">{depositError}</div>}
               </div>
-              {depositAmount && parseCSPR(depositAmount) > 0n && (
-                <div className="info-row" style={{ marginBottom: '0.5rem', fontSize: '0.9em', color: parseCSPR(depositAmount) < MIN_DEPOSIT_MOTES ? '#e74c3c' : '#666' }}>
+              {depositAmount && depositMotes > 0n && (
+                <div className="info-row" style={{ marginBottom: '0.5rem', fontSize: '0.9em', color: depositMotes < MIN_DEPOSIT_MOTES ? '#e74c3c' : '#666' }}>
                   <span>Will deposit:</span>
                   <strong>
-                    {formatCSPR(parseCSPR(depositAmount))} CSPR
-                    {parseCSPR(depositAmount) < MIN_DEPOSIT_MOTES && ` (below minimum ${MIN_DEPOSIT_CSPR.toString()} CSPR)`}
+                    {formatCSPR(depositMotes)} CSPR
+                    {depositMotes < MIN_DEPOSIT_MOTES && ` (below minimum ${MIN_DEPOSIT_CSPR.toString()} CSPR)`}
                   </strong>
                 </div>
               )}
               <button
                 onClick={handleDeposit}
                 className="btn btn-primary btn-action"
-                disabled={!isConnected || !contractsConfigured || !proxyCallerWasmBytes || isAnyTxPending || parseCSPR(depositAmount) < MIN_DEPOSIT_MOTES}
+                disabled={!isConnected || !contractsConfigured || !proxyCallerWasmBytes || isAnyTxPending || depositMotes < MIN_DEPOSIT_MOTES || Boolean(depositError)}
               >
                 Deposit {depositAmount || '0'} CSPR
               </button>
@@ -2564,13 +2595,14 @@ function App() {
                 <strong>{formatWad(availableToBorrow)} mCSPR</strong>
               </div>
               <div className="input-group">
-                <div className="input-row">
+                <div className={`input-row${borrowError ? ' input-error' : ''}`}>
                   <input
                     type="text"
                     value={borrowAmount}
                     onChange={(e) => setBorrowAmount(normalizeDecimalInput(e.target.value))}
                     placeholder="Amount in mCSPR"
                     disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending}
+                    aria-invalid={Boolean(borrowError)}
                   />
                   <button
                     type="button"
@@ -2582,11 +2614,12 @@ function App() {
                   </button>
                   <span className="input-unit">mCSPR</span>
                 </div>
+                {borrowError && <div className="input-error-text">{borrowError}</div>}
               </div>
               <button
                 onClick={handleBorrow}
                 className="btn btn-primary btn-action"
-                disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending || parseCSPR(borrowAmount) === 0n}
+                disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending || borrowMotes === 0n || Boolean(borrowError)}
               >
                 Borrow {borrowAmount || '0'} mCSPR
               </button>
@@ -2613,13 +2646,14 @@ function App() {
                 <strong>{formatWad(debtWad)} mCSPR</strong>
               </div>
               <div className="input-group">
-                <div className="input-row">
+                <div className={`input-row${repayError ? ' input-error' : ''}`}>
                   <input
                     type="text"
                     value={repayAmount}
                     onChange={(e) => setRepayAmount(normalizeDecimalInput(e.target.value))}
                     placeholder="Amount in mCSPR"
                     disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending}
+                    aria-invalid={Boolean(repayError)}
                   />
                   <button
                     type="button"
@@ -2631,19 +2665,21 @@ function App() {
                   </button>
                   <span className="input-unit">mCSPR</span>
                 </div>
+                {repayError && <div className="input-error-text">{repayError}</div>}
+                {!repayError && repayHint && <div className="input-hint">{repayHint}</div>}
               </div>
               <div className="btn-group">
                 <button
                   onClick={handleApprove}
                   className="btn btn-secondary"
-                  disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending || parseCSPR(repayAmount) === 0n}
+                  disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending || repayMotes === 0n}
                 >
                   1. Approve
                 </button>
                 <button
                   onClick={handleRepay}
                   className="btn btn-primary"
-                  disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending || parseCSPR(repayAmount) === 0n}
+                  disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending || repayMotes === 0n || Boolean(repayError)}
                 >
                   2. Repay {repayAmount || '0'} mCSPR
                 </button>
@@ -2714,13 +2750,14 @@ function App() {
               ) : (
                 <>
                   <div className="input-group">
-                    <div className="input-row">
+                    <div className={`input-row${withdrawError ? ' input-error' : ''}`}>
                       <input
                         type="text"
                         value={withdrawAmount}
                         onChange={(e) => setWithdrawAmount(normalizeDecimalInput(e.target.value))}
                         placeholder="Amount in CSPR"
                         disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending}
+                        aria-invalid={Boolean(withdrawError)}
                       />
                       <button
                         type="button"
@@ -2732,12 +2769,13 @@ function App() {
                       </button>
                       <span className="input-unit">CSPR</span>
                     </div>
+                    {withdrawError && <div className="input-error-text">{withdrawError}</div>}
                   </div>
                   <div className="btn-group">
                     <button
                       onClick={handleRequestWithdraw}
                       className="btn btn-primary"
-                      disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending || parseCSPR(withdrawAmount) === 0n}
+                      disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending || withdrawMotes === 0n || Boolean(withdrawError)}
                     >
                       Withdraw {withdrawAmount || '0'} CSPR
                     </button>

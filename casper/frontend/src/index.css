@@ -416,6 +416,11 @@ body {
   opacity: 0.5;
 }
 
+.input-row.input-error input {
+  border-color: var(--error);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.18);
+}
+
 .input-row .btn-max {
   padding: 0.5rem 0.75rem;
   font-size: 0.75rem;
