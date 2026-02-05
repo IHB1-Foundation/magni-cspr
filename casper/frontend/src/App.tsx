@@ -151,13 +151,30 @@ function formatWad(wad: bigint): string {
   return `${whole}.${fracStr}`
 }
 
+const DECIMAL_INPUT_REGEX = /^\d*(?:\.\d*)?$/
+
+function normalizeDecimalInput(input: string): string {
+  const trimmed = input.trim()
+  if (trimmed === '') return ''
+  let cleaned = trimmed.replace(/[^\d.]/g, '')
+  const firstDot = cleaned.indexOf('.')
+  if (firstDot !== -1) {
+    cleaned = cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, '')
+  }
+  if (cleaned.startsWith('.')) return `0${cleaned}`
+  return cleaned
+}
+
 function parseCSPR(input: string): bigint {
-  const parts = input.split('.')
-  const whole = BigInt(parts[0] || '0')
+  const normalized = input.trim()
+  if (normalized === '') return 0n
+  if (!DECIMAL_INPUT_REGEX.test(normalized)) return 0n
+  const parts = normalized.split('.')
+  const whole = parts[0] ? BigInt(parts[0]) : 0n
   let frac = BigInt(0)
-  if (parts[1]) {
+  if (parts[1] && parts[1].length > 0) {
     const fracPart = parts[1].slice(0, MOTES_DECIMALS).padEnd(MOTES_DECIMALS, '0')
-    frac = BigInt(fracPart)
+    if (fracPart) frac = BigInt(fracPart)
   }
   return whole * ONE_CSPR + frac
 }
@@ -2486,7 +2503,7 @@ function App() {
                   <input
                     type="text"
                     value={depositAmount}
-                    onChange={(e) => setDepositAmount(e.target.value)}
+                    onChange={(e) => setDepositAmount(normalizeDecimalInput(e.target.value))}
                     placeholder={`Min ${MIN_DEPOSIT_CSPR.toString()} CSPR`}
                     disabled={!isConnected || !contractsConfigured || !proxyCallerWasmBytes || isAnyTxPending}
                   />
@@ -2551,7 +2568,7 @@ function App() {
                   <input
                     type="text"
                     value={borrowAmount}
-                    onChange={(e) => setBorrowAmount(e.target.value)}
+                    onChange={(e) => setBorrowAmount(normalizeDecimalInput(e.target.value))}
                     placeholder="Amount in mCSPR"
                     disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending}
                   />
@@ -2600,7 +2617,7 @@ function App() {
                   <input
                     type="text"
                     value={repayAmount}
-                    onChange={(e) => setRepayAmount(e.target.value)}
+                    onChange={(e) => setRepayAmount(normalizeDecimalInput(e.target.value))}
                     placeholder="Amount in mCSPR"
                     disabled={!isConnected || !contractsConfigured || debtWad === 0n || isAnyTxPending}
                   />
@@ -2701,7 +2718,7 @@ function App() {
                       <input
                         type="text"
                         value={withdrawAmount}
-                        onChange={(e) => setWithdrawAmount(e.target.value)}
+                        onChange={(e) => setWithdrawAmount(normalizeDecimalInput(e.target.value))}
                         placeholder="Amount in CSPR"
                         disabled={!isConnected || !contractsConfigured || vaultStatus !== VaultStatus.Active || isAnyTxPending}
                       />
